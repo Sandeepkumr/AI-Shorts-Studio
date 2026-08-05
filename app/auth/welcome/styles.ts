@@ -1,0 +1,148 @@
+import { StyleSheet } from "react-native";
+
+import type { AppTheme } from "../../../src/theme";
+
+export const welcomeColors = {
+  accent: "#16D6A3",
+  buttonEnd: "#10B981",
+  buttonStart: "#18E0A8",
+  subtitle: "#A1A8B3",
+  textPrimary: "#FFFFFF",
+} as const;
+
+export function createWelcomeStyles(theme: AppTheme, compact: boolean, heroSize: number) {
+  return StyleSheet.create({
+    safeArea: { backgroundColor: theme.colors.background, flex: 1 },
+    screen: { backgroundColor: theme.colors.background, flex: 1 },
+    header: {
+      alignItems: "center",
+      justifyContent: "center",
+      minHeight: compact ? 84 : 104,
+      paddingTop: compact ? theme.spacing[8] : theme.spacing[12],
+    },
+    brandLockup: { alignItems: "center", marginTop: compact ? theme.spacing[4] : theme.spacing[8] },
+    brandMarkClip: {
+      height: compact ? 38 : 46,
+      overflow: "hidden",
+      width: compact ? 38 : 46,
+    },
+    brandMarkSource: {
+      height: compact ? 148 : 180,
+      left: compact ? -40 : -49,
+      position: "absolute",
+      top: compact ? -52 : -64,
+      width: compact ? 222 : 270,
+    },
+    brand: {
+      color: welcomeColors.textPrimary,
+      fontFamily: "Poppins_600SemiBold",
+      fontSize: compact ? 28 : 32,
+      letterSpacing: -0.6,
+      lineHeight: 38,
+      marginTop: compact ? -2 : -4,
+    },
+    pager: { flex: 1 },
+    page: { alignItems: "center", flex: 1, paddingHorizontal: theme.spacing[24] },
+    heroWrap: {
+      alignItems: "center",
+      height: heroSize * (compact ? 1.02 : 1.1),
+      justifyContent: "center",
+      marginTop: compact ? theme.spacing[8] : 0,
+      overflow: "visible",
+      width: heroSize,
+    },
+    heroGlow: {
+      backgroundColor: `${welcomeColors.accent}24`,
+      borderRadius: theme.radius.round,
+      height: heroSize * 0.62,
+      opacity: 0,
+      position: "absolute",
+      width: heroSize * 0.62,
+    },
+    heroImage: {
+      height: heroSize * (850 / 690),
+      position: "absolute",
+      resizeMode: "contain",
+      top: 0,
+      width: heroSize,
+    },
+    headlineWrap: { marginTop: compact ? theme.spacing[16] : theme.spacing[24] + theme.spacing[4] },
+    headline: {
+      color: welcomeColors.textPrimary,
+      fontFamily: "Poppins_800ExtraBold",
+      fontSize: compact ? 34 : 38,
+      letterSpacing: -0.6,
+      lineHeight: compact ? 42 : 48,
+      textAlign: "center",
+    },
+    headlineAccent: { color: welcomeColors.accent },
+    subtitle: {
+      color: welcomeColors.subtitle,
+      fontFamily: "Poppins_400Regular",
+      fontSize: 18,
+      lineHeight: 26,
+      marginTop: compact ? theme.spacing[12] : theme.spacing[16],
+      maxWidth: heroSize * 1.17,
+      textAlign: "center",
+    },
+    footer: { paddingHorizontal: theme.spacing[24], paddingTop: theme.spacing[8] },
+    indicatorRow: {
+      alignItems: "center",
+      flexDirection: "row",
+      gap: 10,
+      justifyContent: "center",
+    },
+    indicator: {
+      backgroundColor: "rgba(255, 255, 255, 0.2)",
+      borderRadius: 3,
+      height: 6,
+    },
+    primaryGradient: {
+      borderRadius: 18,
+      height: 58,
+      marginTop: compact ? theme.spacing[20] : theme.spacing[32],
+      shadowColor: welcomeColors.accent,
+      shadowOffset: { height: 8, width: 0 },
+      shadowOpacity: 0.25,
+      shadowRadius: 10,
+    },
+    primaryButton: { borderRadius: 18, height: 58 },
+    primaryButtonText: {
+      color: theme.colors.background,
+      fontFamily: "Poppins_600SemiBold",
+      fontSize: 18,
+    },
+    guestAction: {
+      alignItems: "center",
+      marginTop: theme.spacing[20],
+      paddingBottom: compact ? theme.spacing[8] : theme.spacing[12],
+      paddingVertical: theme.spacing[8],
+    },
+    guestText: {
+      color: "rgba(255, 255, 255, 0.6)",
+      fontFamily: "Poppins_600SemiBold",
+      fontSize: 16,
+      textDecorationLine: "underline",
+    },
+    particleLayer: { ...StyleSheet.absoluteFillObject },
+    particle: {
+      alignItems: "center",
+      backgroundColor: welcomeColors.accent,
+      borderRadius: theme.radius.round,
+      justifyContent: "center",
+      position: "absolute",
+      shadowColor: welcomeColors.accent,
+      shadowOpacity: 0.45,
+      shadowRadius: 5,
+    },
+    sparkleArm: {
+      backgroundColor: welcomeColors.accent,
+      height: 1,
+      position: "absolute",
+      shadowColor: welcomeColors.accent,
+      shadowOpacity: 0.65,
+      shadowRadius: 4,
+    },
+    sparkleArmVertical: { transform: [{ rotate: "90deg" }] },
+  });
+}
