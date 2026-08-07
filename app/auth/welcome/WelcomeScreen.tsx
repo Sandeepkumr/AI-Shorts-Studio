@@ -25,8 +25,8 @@ import { Button } from "../../../src/components/Button";
 import { authService } from "../../../src/services/auth/authService";
 import { useTheme } from "../../../src/theme";
 
-const HERO_ART = require("../../../assets/welcome-hero-trimmed.png");
-const LOGO_ART = require("../../../assets/shivora-logo-source.png");
+const HERO_ART = require("../../../assets/hero3.png");
+const LOGO_ART = require("../../../assets/logo.png");
 const PAGES = ["welcome-1", "welcome-2", "welcome-3"] as const;
 
 function FloatingParticle({ delay, kind, left, opacity, size, top }: Particle) {
@@ -132,7 +132,7 @@ export default function WelcomeScreen() {
             <View style={styles.brandMarkClip}>
               <Image source={LOGO_ART} style={styles.brandMarkSource} />
             </View>
-            <Text accessibilityRole="header" style={styles.brand}>Shivora</Text>
+        
           </View>
         </Animated.View>
 
