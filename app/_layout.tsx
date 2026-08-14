@@ -14,6 +14,9 @@ function RootNavigator() {
     >
       <Stack.Screen name="(tabs)" />
       <Stack.Screen name="component-showcase" />
+      <Stack.Screen name="add-story-image-to-video" />
+      <Stack.Screen name="story-analyze" />
+      <Stack.Screen name="select-characters" />
     </Stack>
   );
 }

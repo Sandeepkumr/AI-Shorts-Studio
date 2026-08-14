@@ -1,0 +1,937 @@
+import React, { useState } from 'react';
+import {
+  Alert,
+  Image,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+  useWindowDimensions,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
+
+/* =========================================================
+   ASSETS
+   This file lives at:
+   app/(tabs)/create video screen text to video.tsx
+   ========================================================= */
+
+const ASSETS = {
+  textVideoHero: require('../../assets/text-video-hero.png'),
+  magicFeather: require('../../assets/magic-feather.png'),
+  aiCharacter: require('../../assets/ai-character.png'),
+  characterBlueprint: require('../../assets/character-blueprint.png'),
+  aiSuggestion: require('../../assets/ai-suggestion.png'),
+};
+
+/* =========================================================
+   THEME
+   ========================================================= */
+
+const COLORS = {
+  background: '#020A10',
+  surface: '#071923',
+  surfaceAlt: '#061720',
+  inputSurface: '#061822',
+
+  text: '#F5F7F8',
+  secondary: '#B1C0C7',
+  muted: '#81939D',
+
+  cyan: '#08D9D0',
+  cyanBright: '#00E7E0',
+  border: '#123A48',
+  borderBright: '#00B7B2',
+
+  purple: '#A35CFF',
+  purpleSurface: '#190D31',
+};
+
+const MAX_STORY_LENGTH = 2000;
+
+const EXAMPLE_TEXT =
+  'A brave little robot explores a magical forest, meets friendly creatures and discovers a hidden treasure.';
+
+const AI_ITEMS = [
+  { icon: 'happy-outline' as const, label: 'Characters' },
+  { icon: 'film-outline' as const, label: 'Scenes' },
+  { icon: 'color-wand-outline' as const, label: 'Animations' },
+  { icon: 'chatbubble-ellipses-outline' as const, label: 'Dialogues' },
+  { icon: 'pulse-outline' as const, label: 'Voiceover' },
+];
+
+/* =========================================================
+   SCREEN
+   ========================================================= */
+
+export default function CreateVideoScreen() {
+  const router = useRouter();
+  const { width } = useWindowDimensions();
+  const [story, setStory] = useState('');
+
+  /*
+   * The reference image is a compact iPhone layout.
+   * Keep the same proportions from the previous Home screen:
+   * moderate horizontal padding, compact vertical rhythm.
+   */
+  const side = width <= 375 ? 18 : 20;
+  const contentWidth = width - side * 2;
+  const aiItemWidth = (contentWidth - 24) / 5;
+
+  const updateStory = (value: string) => {
+    setStory(value.slice(0, MAX_STORY_LENGTH));
+  };
+
+  const handleContinue = () => {
+    const cleanStory = story.trim();
+
+    if (!cleanStory) {
+      Alert.alert(
+        'Add your story',
+        'Describe your story before continuing.'
+      );
+      return;
+    }
+
+    router.push({
+      pathname: '/ai-preview' as any,
+      params: { story: cleanStory },
+    });
+  };
+
+  const handleExample = () => {
+    setStory(EXAMPLE_TEXT);
+  };
+
+  const handleAISuggestion = () => {
+    setStory(EXAMPLE_TEXT);
+  };
+
+  return (
+    <View style={styles.root}>
+      <SafeAreaView edges={['top']} style={styles.safeArea}>
+        <KeyboardAvoidingView
+          style={styles.keyboard}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        >
+          <ScrollView
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+            contentContainerStyle={[
+              styles.scrollContent,
+              { paddingHorizontal: side },
+            ]}
+          >
+            {/* =================================================
+                HEADER
+               ================================================= */}
+
+            <View style={styles.header}>
+              <Pressable
+                onPress={() => router.back()}
+                style={styles.backButton}
+                hitSlop={8}
+              >
+                <Ionicons
+                  name="chevron-back"
+                  size={27}
+                  color={COLORS.text}
+                />
+              </Pressable>
+
+              <View style={styles.headerCenter}>
+                <Text style={styles.headerTitle}>
+                  Text to <Text style={styles.cyan}>Video</Text>
+                </Text>
+                <Ionicons
+                  name="sparkles"
+                  size={19}
+                  color={COLORS.cyan}
+                  style={styles.headerSparkle}
+                />
+              </View>
+
+              <View style={styles.creditPill}>
+                <Ionicons
+                  name="layers-outline"
+                  size={20}
+                  color={COLORS.cyan}
+                />
+                <Text style={styles.creditValue}>12,450</Text>
+                <Text style={styles.creditPlus}>+</Text>
+              </View>
+            </View>
+
+            {/* =================================================
+                HERO
+               ================================================= */}
+
+            <View style={styles.heroCard}>
+              <Image
+                source={ASSETS.textVideoHero}
+                style={styles.heroArtwork}
+                resizeMode="contain"
+              />
+
+              <View style={styles.heroCopy}>
+                <Text style={styles.heroTitle}>
+                  Describe your idea
+                </Text>
+
+                <Text style={styles.heroDescription}>
+                  Write your story idea and let AI create{`\n`}
+                  a stunning animated video with{`\n`}
+                  characters, scenes and voice.
+                </Text>
+              </View>
+            </View>
+
+            {/* =================================================
+                STORY INPUT
+               ================================================= */}
+
+            <View style={styles.storyCard}>
+              {/* top prompt row */}
+              <View style={styles.promptRow}>
+                <Ionicons
+                  name="pencil-outline"
+                  size={25}
+                  color={COLORS.secondary}
+                />
+
+                <Text style={styles.promptPlaceholder}>
+                  Describe your story idea in detail...
+                </Text>
+              </View>
+
+              <Pressable
+                style={styles.examplePill}
+                onPress={handleExample}
+              >
+                <Ionicons
+                  name="sparkles"
+                  size={15}
+                  color={COLORS.cyan}
+                />
+                <Text style={styles.exampleText}>Example</Text>
+              </Pressable>
+
+              {/* editable story area */}
+              <View style={styles.storyEditorWrap}>
+                <TextInput
+                  value={story}
+                  onChangeText={updateStory}
+                  multiline
+                  textAlignVertical="top"
+                  style={styles.storyEditor}
+                  placeholder=""
+                  maxLength={MAX_STORY_LENGTH}
+                  scrollEnabled
+                />
+
+                {!story && (
+                  <Text style={styles.storyExampleText} pointerEvents="none">
+                    {EXAMPLE_TEXT}
+                  </Text>
+                )}
+
+                <Image
+                  source={ASSETS.magicFeather}
+                  resizeMode="contain"
+                  style={styles.magicFeather}
+                />
+              </View>
+
+              <Text style={styles.characterCount}>
+                {story.length} / {MAX_STORY_LENGTH}
+              </Text>
+            </View>
+
+            {/* =================================================
+                AI OUTPUT
+               ================================================= */}
+
+            <View style={styles.aiOutputCard}>
+              <View style={styles.aiOutputTitleRow}>
+                <Text style={styles.aiOutputTitle}>
+                  What AI will generate for you
+                </Text>
+                <Ionicons
+                  name="sparkles"
+                  size={17}
+                  color={COLORS.cyan}
+                />
+              </View>
+
+              <View style={styles.aiItemsRow}>
+                {AI_ITEMS.map((item) => (
+                  <View
+                    key={item.label}
+                    style={[
+                      styles.aiItem,
+                      { width: aiItemWidth },
+                    ]}
+                  >
+                    <View style={styles.aiIconCircle}>
+                      <Ionicons
+                        name={item.icon}
+                        size={26}
+                        color={COLORS.cyanBright}
+                      />
+                    </View>
+
+                    <Text
+                      numberOfLines={1}
+                      style={styles.aiItemLabel}
+                    >
+                      {item.label}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            </View>
+
+            {/* =================================================
+                AI CHARACTER
+               ================================================= */}
+
+            <View style={styles.characterCard}>
+              <Image
+                source={ASSETS.aiCharacter}
+                style={styles.characterImage}
+                resizeMode="contain"
+              />
+
+              <View style={styles.characterCopy}>
+                <Text style={styles.characterTitle}>
+                  AI will create
+                </Text>
+
+                <Text style={styles.characterDescription}>
+                  Unique characters and maintain{`\n`}
+                  their style throughout your story.
+                </Text>
+              </View>
+
+              <View style={styles.characterDots}>
+                <View style={styles.smallDot} />
+                <View style={styles.smallDot} />
+                <View style={styles.smallDot} />
+                <View style={[styles.smallDot, styles.brightDot]} />
+                <View style={[styles.smallDot, styles.brightDot]} />
+              </View>
+
+              <Image
+                source={ASSETS.characterBlueprint}
+                style={styles.blueprintImage}
+                resizeMode="contain"
+              />
+            </View>
+
+            {/* =================================================
+                AI SUGGESTION
+               ================================================= */}
+
+            <View style={styles.suggestionCard}>
+              <Image
+                source={ASSETS.aiSuggestion}
+                style={styles.suggestionIcon}
+                resizeMode="contain"
+              />
+
+              <View style={styles.suggestionCopy}>
+                <Text style={styles.suggestionTitle}>
+                  Need inspiration?
+                </Text>
+
+                <Text style={styles.suggestionDescription}>
+                  Use AI to get ideas and prompts{`\n`}
+                  for your video.
+                </Text>
+              </View>
+
+              <Pressable
+                style={styles.suggestionButton}
+                onPress={handleAISuggestion}
+              >
+                <Ionicons
+                  name="sparkles"
+                  size={16}
+                  color={COLORS.text}
+                />
+                <Text
+                  numberOfLines={1}
+                  style={styles.suggestionButtonText}
+                >
+                  Get AI Suggestion
+                </Text>
+                <Ionicons
+                  name="chevron-forward"
+                  size={19}
+                  color={COLORS.text}
+                />
+              </Pressable>
+            </View>
+
+
+            {/* =================================================
+                CONTINUE
+               ================================================= */}
+
+            <Pressable
+              style={styles.continueButton}
+              onPress={handleContinue}
+            >
+              <Text style={styles.continueText}>Continue</Text>
+              <Ionicons
+                name="arrow-forward"
+                size={28}
+                color="#001114"
+                style={styles.continueArrow}
+              />
+            </Pressable>
+          </ScrollView>
+        </KeyboardAvoidingView>
+      </SafeAreaView>
+    </View>
+  );
+}
+
+/* =========================================================
+   STYLES
+   Reference: attached 853 x 1844 screen.
+   Logical layout is tuned for a ~390pt wide iPhone.
+   ========================================================= */
+
+const styles = StyleSheet.create({
+  root: {
+    flex: 1,
+    backgroundColor: COLORS.background,
+  },
+
+  safeArea: {
+    flex: 1,
+    backgroundColor: COLORS.background,
+  },
+
+  keyboard: {
+    flex: 1,
+  },
+
+  scrollContent: {
+    paddingTop: 6,
+    paddingBottom: 28,
+  },
+
+  /* =======================================================
+     HEADER
+     ======================================================= */
+
+  header: {
+    height: 61,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 14,
+  },
+
+  backButton: {
+    width: 48,
+    height: 48,
+    borderRadius: 16,
+    borderWidth: 1.2,
+    borderColor: COLORS.border,
+    backgroundColor: '#06131C',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  headerCenter: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginHorizontal: 7,
+  },
+
+  headerTitle: {
+    color: COLORS.text,
+    fontSize: 26,
+    lineHeight: 31,
+    fontWeight: '700',
+    letterSpacing: -0.5,
+  },
+
+  cyan: {
+    color: COLORS.cyan,
+  },
+
+  headerSparkle: {
+    marginLeft: 4,
+    marginTop: -13,
+  },
+
+  creditPill: {
+    height: 40,
+    minWidth: 116,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: '#061620',
+    paddingHorizontal: 9,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  creditValue: {
+    color: COLORS.text,
+    fontSize: 14,
+    lineHeight: 18,
+    fontWeight: '500',
+    marginLeft: 6,
+  },
+
+  creditPlus: {
+    color: COLORS.cyan,
+    fontSize: 24,
+    lineHeight: 25,
+    fontWeight: '300',
+    marginLeft: 5,
+  },
+
+  /* =======================================================
+     HERO
+     ======================================================= */
+
+  heroCard: {
+    height: 126,
+    borderRadius: 19,
+    borderWidth: 1.2,
+    borderColor: COLORS.cyan,
+    backgroundColor: '#071924',
+    overflow: 'hidden',
+    position: 'relative',
+    marginBottom: 12,
+  },
+
+  heroArtwork: {
+    position: 'absolute',
+    right: -8,
+    top: 1,
+    width: '66%',
+    height: '100%',
+  },
+
+  heroCopy: {
+    position: 'absolute',
+    left: 22,
+    top: 21,
+    width: '48%',
+    zIndex: 3,
+  },
+
+  heroTitle: {
+    color: COLORS.text,
+    fontSize: 19,
+    lineHeight: 24,
+    fontWeight: '600',
+  },
+
+  heroDescription: {
+    color: COLORS.secondary,
+    fontSize: 11.5,
+    lineHeight: 18,
+    marginTop: 5,
+  },
+
+  /* =======================================================
+     STORY CARD
+     ======================================================= */
+
+  storyCard: {
+    height: 218,
+    borderRadius: 19,
+    borderWidth: 1.3,
+    borderColor: COLORS.cyan,
+    backgroundColor: COLORS.inputSurface,
+    paddingHorizontal: 14,
+    paddingTop: 13,
+    paddingBottom: 10,
+    overflow: 'hidden',
+    marginBottom: 12,
+  },
+
+  promptRow: {
+    height: 32,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+
+  promptPlaceholder: {
+    flex: 1,
+    marginLeft: 9,
+    color: COLORS.secondary,
+    fontSize: 13,
+    lineHeight: 18,
+  },
+
+  promptInput: {
+    flex: 1,
+    marginLeft: 9,
+    padding: 0,
+    color: COLORS.secondary,
+    fontSize: 11.8,
+    lineHeight: 16,
+  },
+
+  examplePill: {
+    alignSelf: 'flex-start',
+    height: 29,
+    paddingHorizontal: 10,
+    borderRadius: 15,
+    backgroundColor: '#063B45',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 7,
+  },
+
+  exampleText: {
+    color: COLORS.cyan,
+    fontSize: 10.5,
+    lineHeight: 14,
+    fontWeight: '500',
+  },
+
+  storyEditorWrap: {
+    flex: 1,
+    marginTop: 6,
+    position: 'relative',
+    overflow: 'hidden',
+  },
+
+  storyEditor: {
+    flex: 1,
+    padding: 0,
+    paddingRight: 92,
+    color: COLORS.text,
+    fontSize: 13,
+    lineHeight: 20,
+    zIndex: 2,
+  },
+
+  storyExampleText: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    width: '67%',
+    color: COLORS.text,
+    fontSize: 13,
+    lineHeight: 20,
+  },
+
+  magicFeather: {
+    position: 'absolute',
+    right: -4,
+    top: -4,
+    width: 118,
+    height: 136,
+    opacity: 0.95,
+    zIndex: 1,
+  },
+
+  characterCount: {
+    color: COLORS.cyan,
+    fontSize: 10,
+    lineHeight: 14,
+    marginTop: 2,
+  },
+
+  /* =======================================================
+     AI OUTPUT
+     ======================================================= */
+
+  aiOutputCard: {
+    height: 116,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.surface,
+    paddingHorizontal: 11,
+    paddingTop: 11,
+    marginBottom: 12,
+  },
+
+  aiOutputTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+
+  aiOutputTitle: {
+    color: COLORS.text,
+    fontSize: 13,
+    lineHeight: 17,
+    fontWeight: '600',
+  },
+
+  aiItemsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 10,
+  },
+
+  aiItem: {
+    alignItems: 'center',
+  },
+
+  aiIconCircle: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#082632',
+    borderWidth: 1,
+    borderColor: '#124555',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  aiItemLabel: {
+    color: COLORS.secondary,
+    fontSize: 9.5,
+    lineHeight: 13,
+    marginTop: 4,
+  },
+
+  /* =======================================================
+     CHARACTER CARD
+     ======================================================= */
+
+  characterCard: {
+    height: 105,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.surfaceAlt,
+    overflow: 'hidden',
+    position: 'relative',
+    marginBottom: 12,
+  },
+
+  characterImage: {
+    position: 'absolute',
+    left: 7,
+    bottom: -1,
+    width: 112,
+    height: 104,
+  },
+
+  characterCopy: {
+    position: 'absolute',
+    left: 122,
+    top: 20,
+    width: 137,
+  },
+
+  characterTitle: {
+    color: COLORS.cyan,
+    fontSize: 13.5,
+    lineHeight: 18,
+    fontWeight: '600',
+  },
+
+  characterDescription: {
+    color: COLORS.secondary,
+    fontSize: 9.5,
+    lineHeight: 14,
+    marginTop: 5,
+  },
+
+  characterDots: {
+    position: 'absolute',
+    right: 113,
+    top: 51,
+    flexDirection: 'row',
+    gap: 4,
+  },
+
+  smallDot: {
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: '#0A6670',
+  },
+
+  brightDot: {
+    backgroundColor: COLORS.cyan,
+  },
+
+  blueprintImage: {
+    position: 'absolute',
+    right: 8,
+    top: 8,
+    width: 86,
+    height: 84,
+  },
+
+  /* =======================================================
+     SUGGESTION
+     ======================================================= */
+
+  suggestionCard: {
+    height: 70,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.surface,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    marginBottom: 12,
+  },
+
+  suggestionIcon: {
+    width: 52,
+    height: 52,
+    flexShrink: 0,
+  },
+
+  suggestionCopy: {
+    flex: 1,
+    minWidth: 0,
+    marginLeft: 8,
+    marginRight: 8,
+  },
+
+  suggestionTitle: {
+    color: COLORS.text,
+    fontSize: 12.5,
+    lineHeight: 17,
+    fontWeight: '600',
+  },
+
+  suggestionDescription: {
+    color: COLORS.secondary,
+    fontSize: 9.5,
+    lineHeight: 14,
+    marginTop: 3,
+  },
+
+  suggestionButton: {
+    flex: 0,
+    width: 145,
+    height: 40,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: COLORS.purple,
+    backgroundColor: '#180E35',
+    paddingHorizontal: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 5,
+  },
+
+  suggestionButtonText: {
+    color: COLORS.text,
+    fontSize: 11,
+    lineHeight: 15,
+    fontWeight: '500',
+  },
+
+  /* =======================================================
+     TIPS
+     ======================================================= */
+
+  tipsCard: {
+    height: 61,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.surfaceAlt,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    marginBottom: 12,
+  },
+
+  tipIconBox: {
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+
+  tipCopy: {
+    flex: 1,
+    marginLeft: 7,
+    marginRight: 8,
+  },
+
+  tipTitle: {
+    color: COLORS.cyan,
+    fontSize: 11.5,
+    lineHeight: 15,
+    fontWeight: '600',
+  },
+
+  tipDescription: {
+    color: COLORS.secondary,
+    fontSize: 9.5,
+    lineHeight: 14,
+    marginTop: 2,
+  },
+
+  tipRight: {
+    width: 38,
+    height: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+  },
+
+  tipDivider: {
+    width: 1,
+    height: 32,
+    backgroundColor: '#163642',
+    marginRight: 8,
+  },
+
+  /* =======================================================
+     CONTINUE
+     ======================================================= */
+
+  continueButton: {
+    height: 47,
+    borderRadius: 23.5,
+    backgroundColor: COLORS.cyan,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'relative',
+    shadowColor: COLORS.cyan,
+    shadowOffset: { width: 0, height: 5 },
+    shadowOpacity: 0.2,
+    shadowRadius: 10,
+    elevation: 6,
+  },
+
+  continueText: {
+    color: '#001114',
+    fontSize: 17,
+    lineHeight: 22,
+    fontWeight: '700',
+  },
+
+  continueArrow: {
+    position: 'absolute',
+    right: 16,
+  },
+});

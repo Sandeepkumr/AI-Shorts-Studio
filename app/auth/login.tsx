@@ -1,5 +1,6 @@
 import { useState } from "react";
 import {
+  Image,
   Modal,
   Pressable,
   ScrollView,
@@ -46,7 +47,7 @@ export default function LoginScreen() {
     borderColor: interpolateColor(
       inputFocus.value,
       [0, 1],
-      [theme.colors.border, theme.colors.primary],
+      [theme.colors.primary, theme.colors.primary + 'AA'], // Animate between primary and slightly transparent primary
     ),
     shadowOpacity: inputFocus.value * 0.35,
   }));
@@ -79,6 +80,11 @@ export default function LoginScreen() {
   return (
     <SafeAreaView style={styles.screen}>
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+        <Image
+          source={require('../../assets/loginlogo.png')}
+          style={styles.logo}
+        />
+
         <Pressable
           accessibilityLabel="Go back"
           accessibilityRole="button"
@@ -87,21 +93,6 @@ export default function LoginScreen() {
         >
           <Ionicons color={theme.colors.textPrimary} name="chevron-back" size={24} />
         </Pressable>
-
-        <Animated.View entering={FadeInUp.duration(560)} style={styles.logoGroup}>
-          <View style={styles.logoFilmTop}>
-            <Ionicons color={theme.colors.primary} name="film-outline" size={58} />
-          </View>
-          <View style={styles.logoFilmBottom}>
-            <Ionicons color={theme.colors.primary} name="film-outline" size={58} />
-          </View>
-          <View style={styles.iconTile}>
-            <Ionicons color={theme.colors.primary} name="aperture-outline" size={38} />
-          </View>
-        </Animated.View>
-        <Animated.Text entering={FadeInUp.delay(100).duration(520)} style={styles.brand}>
-          Shiv<Text style={styles.brandAccent}>o</Text>ra
-        </Animated.Text>
 
         <Animated.View entering={FadeInUp.delay(180).duration(600)} style={styles.formCard}>
           <Text style={styles.title}>Continue with mobile</Text>
@@ -202,37 +193,20 @@ export default function LoginScreen() {
       screen: { flex: 1, backgroundColor: theme.colors.background },
       content: { padding: theme.spacing[24], paddingBottom: theme.spacing[64] },
       backButton: {
-        alignItems: "center",
-        borderColor: theme.colors.border,
-        borderRadius: theme.radius.round,
-        borderWidth: 1,
-        height: 42,
-        justifyContent: "center",
-        width: 42,
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        zIndex: 1,
+        padding: theme.spacing[8],
       },
-      logoGroup: {
-        alignItems: "center",
-        alignSelf: "center",
-        height: 118,
-        justifyContent: "center",
-        marginTop: theme.spacing[20],
-        position: "relative",
-        width: 118,
+      logo: {
+        width: 180, 
+        height: 180, 
+        resizeMode: 'contain',
+        alignSelf: 'center',
+        marginTop: theme.spacing[8],
+        marginBottom: theme.spacing[4],
       },
-      logoFilmTop: { position: "absolute", right: 6, top: 0, transform: [{ rotate: "-28deg" }] },
-      logoFilmBottom: { bottom: 0, left: 6, position: "absolute", transform: [{ rotate: "152deg" }] },
-      iconTile: {
-        alignItems: "center",
-        backgroundColor: `${theme.colors.primary}16`,
-        borderColor: theme.colors.primary,
-        borderRadius: theme.radius.round,
-        borderWidth: 1,
-        height: 68,
-        justifyContent: "center",
-        width: 68,
-      },
-      brand: { color: theme.colors.textPrimary, marginTop: theme.spacing[8], textAlign: "center", ...theme.typography.display },
-      brandAccent: { color: theme.colors.primary },
       title: { color: theme.colors.textPrimary, ...theme.typography.title },
       subtitle: { color: theme.colors.textSecondary, marginTop: theme.spacing[4], ...theme.typography.bodySmall },
       formCard: {
@@ -247,13 +221,14 @@ export default function LoginScreen() {
       phoneFocusFrame: {
         borderRadius: theme.radius.medium,
         borderWidth: 1,
-        marginTop: theme.spacing[8],
+        borderColor: theme.colors.primary,
+        marginTop: theme.spacing[8] + 5,
         padding: 1,
         shadowColor: theme.colors.primary,
         shadowOffset: { height: 0, width: 0 },
         shadowRadius: 10,
       },
-      phoneRow: { alignItems: "flex-start", flexDirection: "row", gap: theme.spacing[8], marginTop: theme.spacing[8] },
+      phoneRow: { alignItems: "flex-start", flexDirection: "row", gap: theme.spacing[8], marginTop: theme.spacing[8], height: 59 },
       countryPicker: {
         alignItems: "center",
         backgroundColor: theme.colors.surface,
@@ -285,6 +260,7 @@ export default function LoginScreen() {
       countryOption: { alignItems: "center", flexDirection: "row", paddingVertical: theme.spacing[16] },
       countryOptionLabel: { color: theme.colors.textPrimary, flex: 1, marginLeft: theme.spacing[12], ...theme.typography.body },
       countryOptionCode: { color: theme.colors.textSecondary, ...theme.typography.body },
+      continueAction: { marginTop: theme.spacing[64] },
     });
   }
 }

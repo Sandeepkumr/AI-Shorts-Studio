@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { FlatList, Image, Pressable, Text, useWindowDimensions, View } from "react-native";
+import { Image, Pressable, Text, useWindowDimensions, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import {
   Poppins_400Regular,
@@ -19,15 +19,14 @@ import {
   useIndicatorMotion,
   useParticleMotion,
   useWelcomeEntrance,
-} from "./animations";
-import { createWelcomeStyles, welcomeColors } from "./styles";
+} from "../../../src/auth/welcome/animations";
+import { createWelcomeStyles, welcomeColors } from "../../../src/auth/welcome/styles";
 import { Button } from "../../../src/components/Button";
 import { authService } from "../../../src/services/auth/authService";
 import { useTheme } from "../../../src/theme";
 
 const HERO_ART = require("../../../assets/hero3.png");
 const LOGO_ART = require("../../../assets/logo.png");
-const PAGES = ["welcome-1", "welcome-2", "welcome-3"] as const;
 
 function FloatingParticle({ delay, kind, left, opacity, size, top }: Particle) {
   const theme = useTheme();
@@ -60,21 +59,13 @@ function FloatingParticle({ delay, kind, left, opacity, size, top }: Particle) {
   );
 }
 
-function PageIndicator({ index, pageWidth, scrollX }: { index: number; pageWidth: number; scrollX: SharedValue<number> }) {
-  const theme = useTheme();
-  const styles = useMemo(() => createWelcomeStyles(theme, false, 280), [theme]);
-  const animatedStyle = useIndicatorMotion(index, pageWidth, scrollX);
-
-  return <Animated.View style={[styles.indicator, animatedStyle]} />;
-}
-
-function WelcomePage({ compact, heroSize, width }: { compact: boolean; heroSize: number; width: number }) {
+function WelcomePage({ compact, heroSize }: { compact: boolean; heroSize: number }) {
   const theme = useTheme();
   const styles = useMemo(() => createWelcomeStyles(theme, compact, heroSize), [compact, heroSize, theme]);
   const { headlineStyle, subtitleStyle } = useHeadlineEntrance();
 
   return (
-    <View style={[styles.page, { width }]}>
+    <View style={styles.page}>
       <View style={styles.heroWrap}>
         <View style={styles.heroGlow} />
         <Image accessibilityLabel="Shivora cinematic camera illustration" source={HERO_ART} style={styles.heroImage} />
@@ -99,9 +90,8 @@ export default function WelcomeScreen() {
   const theme = useTheme();
   const { height, width } = useWindowDimensions();
   const compact = height < 760;
-  const heroSize = Math.min(width - theme.spacing[48], compact ? 264 : 320);
+  const heroSize = Math.min(width - theme.spacing[48], compact ? 260 : 360);
   const styles = useMemo(() => createWelcomeStyles(theme, compact, heroSize), [compact, heroSize, theme]);
-  const scrollX = useSharedValue(0);
   const { logoStyle, screenStyle } = useWelcomeEntrance();
   const [isContinuingAsGuest, setIsContinuingAsGuest] = useState(false);
 
@@ -110,7 +100,7 @@ export default function WelcomeScreen() {
 
     try {
       await authService.continueAsGuest();
-      router.replace("/(tabs)/home");
+      router.replace("/home");
     } finally {
       setIsContinuingAsGuest(false);
     }
@@ -132,29 +122,12 @@ export default function WelcomeScreen() {
             <View style={styles.brandMarkClip}>
               <Image source={LOGO_ART} style={styles.brandMarkSource} />
             </View>
-        
           </View>
         </Animated.View>
 
-        <FlatList
-          data={PAGES}
-          decelerationRate="fast"
-          horizontal
-          keyExtractor={(item) => item}
-          onScroll={(event) => {
-            scrollX.value = event.nativeEvent.contentOffset.x;
-          }}
-          pagingEnabled
-          renderItem={() => <WelcomePage compact={compact} heroSize={heroSize} width={width} />}
-          scrollEventThrottle={16}
-          showsHorizontalScrollIndicator={false}
-          style={styles.pager}
-        />
+        <WelcomePage compact={compact} heroSize={heroSize} />
 
         <View style={styles.footer}>
-          <Animated.View entering={FadeIn.delay(1000).duration(400)} style={styles.indicatorRow}>
-            {PAGES.map((_, index) => <PageIndicator index={index} key={index} pageWidth={width} scrollX={scrollX} />)}
-          </Animated.View>
           <Animated.View entering={FadeInUp.delay(500).duration(600)}>
             <LinearGradient
               colors={[welcomeColors.buttonStart, welcomeColors.buttonEnd]}

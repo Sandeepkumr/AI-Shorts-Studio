@@ -1,5 +1,5 @@
 import { forwardRef, useEffect, useRef, useState } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, TextInput as NativeTextInput, View } from "react-native";
+import { Image, Pressable, ScrollView, StyleSheet, Text, TextInput as NativeTextInput, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -108,6 +108,16 @@ export default function OtpVerificationScreen() {
   const inputsRef = useRef<Array<NativeTextInput | null>>([]);
   const resolvedPhone = typeof phone === "string" ? phone : "";
   const otpValue = otp.join("");
+  const formattedPhone = (() => {
+    if (!resolvedPhone) return "";
+    const codes = ["+91", "+44", "+1"];
+    for (const code of codes) {
+      if (resolvedPhone.startsWith(code)) {
+        return `${code} ${resolvedPhone.slice(code.length)}`;
+      }
+    }
+    return resolvedPhone;
+  })();
 
   useEffect(() => {
     if (remainingSeconds === 0) {
@@ -151,9 +161,10 @@ export default function OtpVerificationScreen() {
         return;
       }
 
-      router.replace(
-        result.user.isProfileComplete ? "/(tabs)/home" : "/auth/profile-setup",
-      );
+      router.replace({
+        pathname: result.user.isProfileComplete ? "/(tabs)/home" : "/auth/profile-setup",
+        params: { phone: resolvedPhone },
+      });
     } finally {
       setIsVerifying(false);
     }
@@ -180,6 +191,11 @@ export default function OtpVerificationScreen() {
   return (
     <SafeAreaView style={styles.screen}>
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+        <Image
+          source={require('../../assets/loginlogo.png')}
+          style={styles.logo}
+        />
+
         <Pressable
           accessibilityLabel="Go back"
           accessibilityRole="button"
@@ -189,19 +205,9 @@ export default function OtpVerificationScreen() {
           <Ionicons color={theme.colors.textPrimary} name="chevron-back" size={24} />
         </Pressable>
 
-        <Animated.View entering={FadeInUp.delay(80).duration(620)} style={styles.verificationIllustration}>
-          <View style={styles.illustrationGlow} />
-          <View style={styles.orbitLarge} />
-          <View style={styles.orbitSmall} />
-          <View style={styles.shieldTile}>
-            <Ionicons color={theme.colors.primary} name="shield-checkmark-outline" size={86} />
-          </View>
-          <Ionicons color={theme.colors.primary} name="sparkles" size={17} style={styles.sparkleOne} />
-          <Ionicons color={theme.colors.secondary} name="sparkles" size={14} style={styles.sparkleTwo} />
-        </Animated.View>
         <Animated.Text entering={FadeInUp.delay(160).duration(520)} style={styles.title}>Verify your number</Animated.Text>
         <Animated.Text entering={FadeIn.delay(260).duration(450)} style={styles.subtitle}>
-          Enter the 6-digit verification code{"\n"}sent to <Text style={styles.phoneText}>{resolvedPhone || "your mobile number"}</Text>
+          Enter the 6-digit verification code{"\n"}sent to <Text style={styles.phoneText}>{formattedPhone || "your mobile number"}</Text>
         </Animated.Text>
 
         <Animated.View entering={FadeInUp.delay(300).duration(520)} style={styles.otpRow}>
@@ -269,61 +275,20 @@ export default function OtpVerificationScreen() {
       screen: { flex: 1, backgroundColor: theme.colors.background },
       content: { padding: theme.spacing[24], paddingBottom: theme.spacing[48] },
       backButton: {
-        alignItems: "center",
-        borderColor: theme.colors.border,
-        borderRadius: theme.radius.round,
-        borderWidth: 1,
-        height: 42,
-        justifyContent: "center",
-        width: 42,
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        zIndex: 1,
+        padding: theme.spacing[8],
       },
-      verificationIllustration: {
-        alignItems: "center",
-        alignSelf: "center",
-        height: 194,
-        justifyContent: "center",
-        marginTop: theme.spacing[12],
-        position: "relative",
-        width: 240,
+      logo: {
+        width: 200, 
+        height: 200, 
+        resizeMode: 'contain',
+        alignSelf: 'center',
+        marginTop: theme.spacing[4],
+        marginBottom: theme.spacing[4],
       },
-      illustrationGlow: {
-        backgroundColor: `${theme.colors.primary}16`,
-        borderRadius: theme.radius.round,
-        height: 138,
-        position: "absolute",
-        width: 138,
-      },
-      orbitLarge: {
-        borderColor: `${theme.colors.primary}60`,
-        borderRadius: theme.radius.round,
-        borderWidth: 1,
-        height: 102,
-        position: "absolute",
-        transform: [{ rotate: "-18deg" }],
-        width: 232,
-      },
-      orbitSmall: {
-        borderColor: `${theme.colors.secondary}50`,
-        borderRadius: theme.radius.round,
-        borderWidth: 1,
-        height: 72,
-        position: "absolute",
-        transform: [{ rotate: "23deg" }],
-        width: 208,
-      },
-      shieldTile: {
-        alignItems: "center",
-        backgroundColor: theme.colors.card,
-        borderColor: theme.colors.primary,
-        borderRadius: theme.radius.round,
-        borderWidth: 1,
-        height: 128,
-        justifyContent: "center",
-        width: 128,
-        ...theme.shadows.large,
-      },
-      sparkleOne: { position: "absolute", right: theme.spacing[12], top: theme.spacing[24] },
-      sparkleTwo: { bottom: theme.spacing[20], left: theme.spacing[20], position: "absolute" },
       title: { color: theme.colors.textPrimary, marginTop: theme.spacing[12], textAlign: "center", ...theme.typography.heading },
       subtitle: { color: theme.colors.textSecondary, marginTop: theme.spacing[12], textAlign: "center", ...theme.typography.body },
       phoneText: { color: theme.colors.primary, ...theme.typography.body },
@@ -331,10 +296,10 @@ export default function OtpVerificationScreen() {
       errorText: { color: theme.colors.error, marginTop: theme.spacing[12], ...theme.typography.caption },
       timerRow: { alignItems: "center", flexDirection: "row", justifyContent: "center", marginTop: theme.spacing[32] },
       timerText: { color: theme.colors.textSecondary, marginLeft: theme.spacing[8], ...theme.typography.bodySmall },
-      actions: { gap: theme.spacing[12], marginTop: theme.spacing[32] },
+      actions: { gap: theme.spacing[12], marginTop: theme.spacing[64] + 30 },
       resendButton: { alignItems: "center", paddingVertical: theme.spacing[8] },
       resendText: { color: theme.colors.textSecondary, ...theme.typography.bodySmall },
-      resendLink: { color: remainingSeconds === 0 ? theme.colors.primary : theme.colors.textSecondary },
+      resendLink: { color: theme.colors.primary },
     });
   }
 }

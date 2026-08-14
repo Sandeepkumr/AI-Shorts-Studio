@@ -68,7 +68,7 @@ export function createWelcomeStyles(theme: AppTheme, compact: boolean, heroSize:
       top: -25,
       width: heroSize * 1.40,
     },
-    headlineWrap: { marginTop: compact ? theme.spacing[30] : theme.spacing[32] + 
+    headlineWrap: { marginTop: compact ? 30 : theme.spacing[32] + 
 theme.spacing[4] },
     headline: {
       color: welcomeColors.textPrimary,
