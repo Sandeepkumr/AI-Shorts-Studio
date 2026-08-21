@@ -22,7 +22,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Feather as Icon } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import Svg, { Circle } from 'react-native-svg';
+import Svg, { Circle, Defs, LinearGradient as SvgLinearGradient, Stop } from 'react-native-svg';
 
 const COLORS = {
   background: '#050B12',
@@ -41,6 +41,12 @@ const COLORS = {
   secondary: '#A5B5C8',
   muted: '#8FA5BC',
   waiting: '#9AAEC2',
+};
+
+const PROGRESS_GRADIENT = {
+  start: '#00CFFF',
+  middle: '#2C75FF',
+  end: '#8C2EFF',
 };
 
 type StepStatus =
@@ -356,91 +362,47 @@ const ProcessingScreen = () => {
   ========================================================== */
 
   useEffect(() => {
-    if (mainProgress >= 100) {
-      return;
-    }
+    const waveAnimation = Animated.loop(
+      Animated.sequence([
+        Animated.parallel([
+          Animated.timing(waveOpacity, {
+            toValue: 1,
+            duration: 1800,
+            easing: Easing.inOut(Easing.ease),
+            useNativeDriver: true,
+          }),
+          Animated.timing(waveScale, {
+            toValue: 1.04,
+            duration: 1800,
+            easing: Easing.inOut(Easing.ease),
+            useNativeDriver: true,
+          }),
+        ]),
+        Animated.parallel([
+          Animated.timing(waveOpacity, {
+            toValue: 0.72,
+            duration: 1800,
+            easing: Easing.inOut(Easing.ease),
+            useNativeDriver: true,
+          }),
+          Animated.timing(waveScale, {
+            toValue: 0.98,
+            duration: 1800,
+            easing: Easing.inOut(Easing.ease),
+            useNativeDriver: true,
+          }),
+        ]),
+      ])
+    );
 
-    if (waveAnimationRef.current) {
-      return;
-    }
-
-    const waveAnimation =
-      Animated.loop(
-        Animated.sequence([
-          Animated.parallel([
-            Animated.timing(
-              waveOpacity,
-              {
-                toValue: 1,
-                duration: 1800,
-                easing:
-                  Easing.inOut(
-                    Easing.ease
-                  ),
-                useNativeDriver: true,
-              }
-            ),
-
-            Animated.timing(
-              waveScale,
-              {
-                toValue: 1.04,
-                duration: 1800,
-                easing:
-                  Easing.inOut(
-                    Easing.ease
-                  ),
-                useNativeDriver: true,
-              }
-            ),
-          ]),
-
-          Animated.parallel([
-            Animated.timing(
-              waveOpacity,
-              {
-                toValue: 0.72,
-                duration: 1800,
-                easing:
-                  Easing.inOut(
-                    Easing.ease
-                  ),
-                useNativeDriver: true,
-              }
-            ),
-
-            Animated.timing(
-              waveScale,
-              {
-                toValue: 0.98,
-                duration: 1800,
-                easing:
-                  Easing.inOut(
-                    Easing.ease
-                  ),
-                useNativeDriver: true,
-              }
-            ),
-          ]),
-        ])
-      );
-
-    waveAnimationRef.current =
-      waveAnimation;
-
+    waveAnimationRef.current = waveAnimation;
     waveAnimation.start();
 
     return () => {
-      if (mainProgress < 100) {
-        waveAnimation.stop();
-        waveAnimationRef.current = null;
-      }
+      waveAnimation.stop();
+      waveAnimationRef.current = null;
     };
-  }, [
-    waveOpacity,
-    waveScale,
-    mainProgress,
-  ]);
+  }, [waveOpacity, waveScale]);
 
   /* ==========================================================
      STEPS
@@ -674,7 +636,7 @@ const ProcessingScreen = () => {
         >
           <View style={{ flex: 1 }} />
 
-          <View
+          <TouchableOpacity
             style={[
               styles.creditsDisplay,
               {
@@ -689,6 +651,7 @@ const ProcessingScreen = () => {
                   2,
               },
             ]}
+            onPress={() => router.push('/coins')}
           >
             <Image
               source={require('../assets/coin.png')}
@@ -722,7 +685,7 @@ const ProcessingScreen = () => {
                 COLORS.primary
               }
             />
-          </View>
+          </TouchableOpacity>
         </View>
 
         {/* CONTENT */}
@@ -1073,30 +1036,29 @@ const ProcessingScreen = () => {
             {/* WAVE */}
 
             <Animated.Image
-              source={require('../assets/progress-wave-bg.png')}
-              style={[
-                styles.processingWave,
-                {
-                  width:
-                    sizes.waveWidth,
+                source={require('../assets/progress-wave-bg.png')}
+                style={[
+                  styles.processingWave,
+                  {
+                    width:
+                      sizes.waveWidth,
 
-                  height:
-                    sizes.waveHeight,
+                    height:
+                      sizes.waveHeight,
 
-                  opacity:
-                    waveOpacity,
+                    opacity:
+                      waveOpacity,
 
-                  transform: [
-                    {
-                      scale:
-                        waveScale,
-                    },
-                  ],
-                },
-              ]}
-              resizeMode="contain"
-              pointerEvents="none"
-            />
+                    transform: [
+                      {
+                        scale:
+                          waveScale,
+                      },
+                    ],
+                  },
+                ]}
+                resizeMode="contain"
+              />
 
             {/* SMALLER LOADER CIRCLE */}
 
@@ -1121,6 +1083,28 @@ const ProcessingScreen = () => {
                 }
                 viewBox={`0 0 ${sizes.circle} ${sizes.circle}`}
               >
+                <Defs>
+                  <SvgLinearGradient
+                    id="progressGradient"
+                    x1="0"
+                    y1="0"
+                    x2="1"
+                    y2="1"
+                  >
+                    <Stop
+                      offset="0"
+                      stopColor={PROGRESS_GRADIENT.start}
+                    />
+                    <Stop
+                      offset="0.5"
+                      stopColor={PROGRESS_GRADIENT.middle}
+                    />
+                    <Stop
+                      offset="1"
+                      stopColor={PROGRESS_GRADIENT.end}
+                    />
+                  </SvgLinearGradient>
+                </Defs>
 
                 {/* Background ring */}
 
@@ -1149,9 +1133,7 @@ const ProcessingScreen = () => {
                     sizes.circle / 2
                   }
                   r={radius}
-                  stroke={
-                    COLORS.primary
-                  }
+                  stroke="url(#progressGradient)"
                   strokeWidth={
                     sizes.stroke
                   }
@@ -1384,12 +1366,18 @@ const ProcessingScreen = () => {
                         },
                       ]}
                     >
-                      <View
+                      <LinearGradient
+                        colors={[
+                          PROGRESS_GRADIENT.start,
+                          PROGRESS_GRADIENT.middle,
+                          PROGRESS_GRADIENT.end,
+                        ]}
+                        start={{ x: 0, y: 0.5 }}
+                        end={{ x: 1, y: 0.5 }}
                         style={[
                           styles.progressBarFill,
                           {
                             width: `${step.progress}%`,
-
                             borderRadius:
                               sizes.progressBarHeight /
                               2,
@@ -1983,9 +1971,6 @@ const styles = StyleSheet.create({
   progressBarFill: {
     height:
       '100%',
-
-    backgroundColor:
-      COLORS.primary,
   },
 
   /* Pro Tip */

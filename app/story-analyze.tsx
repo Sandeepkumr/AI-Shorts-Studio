@@ -239,7 +239,7 @@ export default function ImageVideoAnalysisScreen() {
   };
 
   const handleContinue = () => {
-    router.push("/image-video-characters");
+    router.push("/upload-image");
   };
 
   return (
@@ -294,11 +294,12 @@ export default function ImageVideoAnalysisScreen() {
             </Text>
           </View>
 
-          <View
+          <Pressable
             style={[
               styles.creditPill,
               { width: creditWidth },
             ]}
+            onPress={() => router.push('/coins')}
           >
             <Image
               source={ASSETS.coin}
@@ -309,7 +310,7 @@ export default function ImageVideoAnalysisScreen() {
               12,450
             </Text>
             <Text style={styles.creditPlus}>+</Text>
-          </View>
+          </Pressable>
         </View>
 
         {/* ======================================================

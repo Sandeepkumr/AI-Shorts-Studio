@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 
 /* =========================================================
@@ -100,7 +101,7 @@ export default function CreateVideoScreen() {
     }
 
     router.push({
-      pathname: '/ai-preview' as any,
+      pathname: '/customize-story' as any,
       params: { story: cleanStory },
     });
   };
@@ -120,6 +121,59 @@ export default function CreateVideoScreen() {
           style={styles.keyboard}
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         >
+          {/* =================================================
+              HEADER — MATCH APPROVED REFERENCE SCREEN
+             ================================================= */}
+          <View
+            style={[
+              styles.header,
+              { paddingHorizontal: side },
+            ]}
+          >
+            <Pressable
+              onPress={() => router.back()}
+              style={({ pressed }) => [
+                styles.backButton,
+                pressed && styles.pressed,
+              ]}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel="Go back"
+            >
+              <Ionicons
+                name="chevron-back"
+                size={33}
+                color={COLORS.text}
+              />
+            </Pressable>
+
+            <View style={styles.headerCenter}>
+              <Text
+                style={styles.headerTitle}
+                numberOfLines={1}
+                adjustsFontSizeToFit
+                minimumFontScale={0.78}
+              >
+                Text to <Text style={styles.cyan}>Video</Text>
+                <Text style={styles.headerSparkle}>✦</Text>
+              </Text>
+            </View>
+
+            <View style={styles.creditPill}>
+              <Ionicons
+                name="layers-outline"
+                size={20}
+                color={COLORS.cyan}
+              />
+              <Text style={styles.creditValue}>
+                12,450
+              </Text>
+              <Text style={styles.creditPlus}>
+                +
+              </Text>
+            </View>
+          </View>
+
           <ScrollView
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
@@ -131,42 +185,6 @@ export default function CreateVideoScreen() {
             {/* =================================================
                 HEADER
                ================================================= */}
-
-            <View style={styles.header}>
-              <Pressable
-                onPress={() => router.back()}
-                style={styles.backButton}
-                hitSlop={8}
-              >
-                <Ionicons
-                  name="chevron-back"
-                  size={27}
-                  color={COLORS.text}
-                />
-              </Pressable>
-
-              <View style={styles.headerCenter}>
-                <Text style={styles.headerTitle}>
-                  Text to <Text style={styles.cyan}>Video</Text>
-                </Text>
-                <Ionicons
-                  name="sparkles"
-                  size={19}
-                  color={COLORS.cyan}
-                  style={styles.headerSparkle}
-                />
-              </View>
-
-              <View style={styles.creditPill}>
-                <Ionicons
-                  name="layers-outline"
-                  size={20}
-                  color={COLORS.cyan}
-                />
-                <Text style={styles.creditValue}>12,450</Text>
-                <Text style={styles.creditPlus}>+</Text>
-              </View>
-            </View>
 
             {/* =================================================
                 HERO
@@ -384,19 +402,39 @@ export default function CreateVideoScreen() {
                 CONTINUE
                ================================================= */}
 
+            {/* =================================================
+                CONTINUE
+               ================================================= */}
             <Pressable
-              style={styles.continueButton}
+              style={({ pressed }) => [
+                styles.continueButton,
+                pressed && styles.pressed,
+              ]}
               onPress={handleContinue}
+              accessibilityRole="button"
+              accessibilityLabel="Continue"
             >
-              <Text style={styles.continueText}>Continue</Text>
-              <Ionicons
-                name="arrow-forward"
-                size={28}
-                color="#001114"
-                style={styles.continueArrow}
-              />
+              <LinearGradient
+                colors={['#00CFFF', '#2C75FF', '#8C2EFF']}
+                start={{ x: 0, y: 0.5 }}
+                end={{ x: 1, y: 0.5 }}
+                style={styles.continueGradient}
+              >
+                <Text style={styles.continueText}>
+                  Continue
+                </Text>
+
+                <Ionicons
+                  name="arrow-forward"
+                  size={29}
+                  color="#FFFFFF"
+                  style={styles.continueArrow}
+                />
+              </LinearGradient>
             </Pressable>
+
           </ScrollView>
+
         </KeyboardAvoidingView>
       </SafeAreaView>
     </View>
@@ -426,7 +464,7 @@ const styles = StyleSheet.create({
 
   scrollContent: {
     paddingTop: 6,
-    paddingBottom: 28,
+    paddingBottom: 14,
   },
 
   /* =======================================================
@@ -434,38 +472,41 @@ const styles = StyleSheet.create({
      ======================================================= */
 
   header: {
-    height: 61,
+    width: '100%',
+    height: 50,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 14,
   },
 
   backButton: {
     width: 48,
-    height: 48,
-    borderRadius: 16,
-    borderWidth: 1.2,
-    borderColor: COLORS.border,
-    backgroundColor: '#06131C',
+    height: 46,
+    borderRadius: 15,
+    borderWidth: 1.3,
+    borderColor: '#154A5D',
+    backgroundColor: '#061822',
     alignItems: 'center',
     justifyContent: 'center',
+    flexShrink: 0,
   },
 
   headerCenter: {
     flex: 1,
-    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    marginHorizontal: 7,
+    minWidth: 0,
+    paddingHorizontal: 2,
   },
 
   headerTitle: {
     color: COLORS.text,
-    fontSize: 26,
-    lineHeight: 31,
-    fontWeight: '700',
-    letterSpacing: -0.5,
+    fontSize: 20,
+    lineHeight: 23,
+    fontWeight: '800',
+    letterSpacing: -0.7,
+    includeFontPadding: false,
+    textAlign: 'center',
   },
 
   cyan: {
@@ -473,37 +514,39 @@ const styles = StyleSheet.create({
   },
 
   headerSparkle: {
-    marginLeft: 4,
-    marginTop: -13,
+    color: COLORS.cyan,
+    fontSize: 17,
+    fontWeight: '900',
+    marginLeft: 1,
   },
 
   creditPill: {
+    width: 124,
     height: 40,
-    minWidth: 116,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    backgroundColor: '#061620',
+    borderRadius: 17,
+    borderWidth: 1.2,
+    borderColor: '#154A5D',
+    backgroundColor: '#061822',
     paddingHorizontal: 9,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    flexShrink: 0,
   },
 
   creditValue: {
     color: COLORS.text,
-    fontSize: 14,
-    lineHeight: 18,
-    fontWeight: '500',
-    marginLeft: 6,
+    fontSize: 11,
+    fontWeight: '600',
+    marginLeft: 4,
   },
 
   creditPlus: {
     color: COLORS.cyan,
-    fontSize: 24,
-    lineHeight: 25,
-    fontWeight: '300',
-    marginLeft: 5,
+    fontSize: 20,
+    lineHeight: 28,
+    fontWeight: '400',
+    marginLeft: 6,
   },
 
   /* =======================================================
@@ -785,7 +828,7 @@ const styles = StyleSheet.create({
      ======================================================= */
 
   suggestionCard: {
-    height: 70,
+    minHeight: 86,
     borderRadius: 18,
     borderWidth: 1,
     borderColor: COLORS.border,
@@ -793,12 +836,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 10,
-    marginBottom: 12,
+    paddingVertical: 10,
+    marginBottom: 14,
   },
 
   suggestionIcon: {
-    width: 52,
-    height: 52,
+    width: 46,
+    height: 46,
     flexShrink: 0,
   },
 
@@ -806,7 +850,8 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 0,
     marginLeft: 8,
-    marginRight: 8,
+    marginRight: 7,
+    justifyContent: 'center',
   },
 
   suggestionTitle: {
@@ -824,25 +869,26 @@ const styles = StyleSheet.create({
   },
 
   suggestionButton: {
-    flex: 0,
-    width: 145,
-    height: 40,
-    borderRadius: 20,
+    flexShrink: 0,
+    width: 142,
+    height: 42,
+    borderRadius: 21,
     borderWidth: 1,
     borderColor: COLORS.purple,
     backgroundColor: '#180E35',
-    paddingHorizontal: 8,
+    paddingHorizontal: 7,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 5,
+    gap: 4,
   },
 
   suggestionButtonText: {
     color: COLORS.text,
-    fontSize: 11,
+    fontSize: 10.5,
     lineHeight: 15,
     fontWeight: '500',
+    flexShrink: 1,
   },
 
   /* =======================================================
@@ -908,30 +954,46 @@ const styles = StyleSheet.create({
      CONTINUE
      ======================================================= */
 
+  pressed: {
+    opacity: 0.78,
+  },
+
   continueButton: {
-    height: 47,
-    borderRadius: 23.5,
-    backgroundColor: COLORS.cyan,
+    width: '100%',
+    height: 55,
+    marginTop: 0,
+    marginBottom: 4,
+    minHeight: 55,
+    borderRadius: 28,
+    overflow: 'hidden',
+    shadowColor: COLORS.cyan,
+    shadowOffset: { width: 0, height: 7 },
+    shadowOpacity: 0.22,
+    shadowRadius: 11,
+    elevation: 7,
+  },
+
+  continueGradient: {
+    width: '100%',
+    height: 55,
+    minHeight: 55,
+    borderRadius: 28,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    position: 'relative',
-    shadowColor: COLORS.cyan,
-    shadowOffset: { width: 0, height: 5 },
-    shadowOpacity: 0.2,
-    shadowRadius: 10,
-    elevation: 6,
   },
 
   continueText: {
-    color: '#001114',
+    color: '#FFFFFF',
     fontSize: 17,
-    lineHeight: 22,
+    lineHeight: 21,
     fontWeight: '700',
+    marginRight: 20,
   },
 
   continueArrow: {
-    position: 'absolute',
-    right: 16,
+    marginLeft: 0,
   },
+
+
 });

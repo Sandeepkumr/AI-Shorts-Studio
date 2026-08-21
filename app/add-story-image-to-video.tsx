@@ -14,6 +14,7 @@ import {
   useWindowDimensions,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 
@@ -118,7 +119,6 @@ export default function AddStoryImageToVideo() {
 
   // Keep the title readable on compact iPhones without allowing
   // React Native's text auto-fit to collapse it to a tiny size.
-  const headerTitleSize = Math.min(24, Math.max(18, width * 0.06));
 
   /*
    * Five equal columns.
@@ -159,8 +159,6 @@ export default function AddStoryImageToVideo() {
      * Story
      *   ↓
      * AI Analysis
-     *
-     * Change only this route when that screen is created.
      */
     router.push({
       pathname: "/story-analyze" as any,
@@ -223,6 +221,66 @@ export default function AddStoryImageToVideo() {
           Platform.OS === "ios" ? "padding" : undefined
         }
       >
+        {/* ==================================================
+            HEADER — SAME COMPACT REFERENCE POSITION
+        ================================================== */}
+        <View
+          style={[
+            styles.header,
+            {
+              paddingHorizontal: horizontalPadding,
+            },
+          ]}
+        >
+          <Pressable
+            onPress={goBack}
+            hitSlop={10}
+            style={({ pressed }) => [
+              styles.backButton,
+              pressed && styles.pressed,
+            ]}
+            accessibilityRole="button"
+            accessibilityLabel="Go back"
+          >
+            <Ionicons
+              name="chevron-back"
+              size={33}
+              color={COLORS.text}
+            />
+          </Pressable>
+
+          <View style={styles.headerTitleWrap}>
+            <Text
+              style={styles.headerTitle}
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              minimumFontScale={0.78}
+            >
+              Image to{' '}
+              <Text style={styles.headerTitleAccent}>Video</Text>
+              <Text style={styles.headerSparkle}>✦</Text>
+            </Text>
+          </View>
+
+          <Pressable
+            onPress={() => router.push("/coins")}
+            style={[
+              styles.creditPill,
+              {
+                width: width <= 375 ? 112 : 124,
+              },
+            ]}
+          >
+            <Image
+              source={ASSETS.coin}
+              resizeMode="contain"
+              style={styles.coinIcon}
+            />
+            <Text style={styles.creditValue}>12,450</Text>
+            <Text style={styles.creditPlus}>+</Text>
+          </Pressable>
+        </View>
+
         <ScrollView
           style={styles.flex}
           contentContainerStyle={[
@@ -235,68 +293,6 @@ export default function AddStoryImageToVideo() {
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="interactive"
         >
-          {/* ==================================================
-              HEADER
-             ================================================== */}
-
-          <View style={styles.header}>
-            <Pressable
-              onPress={goBack}
-              hitSlop={10}
-              style={({ pressed }) => [
-                styles.backButton,
-                pressed && styles.pressed,
-              ]}
-            >
-              <Ionicons
-                name="chevron-back"
-                size={31}
-                color={COLORS.text}
-              />
-            </Pressable>
-
-            <View style={styles.headerCenter}>
-              <Text
-                numberOfLines={1}
-                style={[
-                  styles.headerTitle,
-                  {
-                    fontSize: headerTitleSize,
-                    lineHeight: headerTitleSize + 5,
-                  },
-                ]}
-              >
-                Image to{" "}
-                <Text style={styles.cyanText}>
-                  Video
-                </Text>
-                <Text style={styles.headerSparkle}>
-                  {" "}✦
-                </Text>
-              </Text>
-            </View>
-
-            <View style={styles.creditPill}>
-              {/* The coin artwork is retained, but the sizing is
-                  controlled so it does not visually dominate. */}
-              <Image
-                source={ASSETS.coin}
-                resizeMode="contain"
-                style={styles.coinImage}
-              />
-
-              <Text style={styles.creditValue}>
-                12,450
-              </Text>
-
-              <Ionicons
-                name="add"
-                size={25}
-                color={COLORS.cyan}
-              />
-            </View>
-          </View>
-
           {/* ==================================================
               HERO
              ================================================== */}
@@ -494,31 +490,38 @@ export default function AddStoryImageToVideo() {
               CONTINUE
              ================================================== */}
 
+        </ScrollView>
+
+        {/* ==================================================
+            FIXED PRIMARY CTA — SAME REFERENCE POSITION/SIZE
+        ================================================== */}
+        <View style={styles.fixedBottom}>
           <Pressable
             onPress={continueToAnalysis}
             style={({ pressed }) => [
               styles.continueButton,
-              !story.trim() &&
-                styles.continueDisabled,
-              pressed &&
-                !!story.trim() &&
-                styles.continuePressed,
+              !story.trim() && styles.continueDisabled,
+              pressed && !!story.trim() && styles.continuePressed,
             ]}
+            accessibilityRole="button"
+            accessibilityLabel="Continue"
           >
-            <Text style={styles.continueText}>
-              Continue
-            </Text>
-
-            <Ionicons
-              name="arrow-forward"
-              size={31}
-              color="#001114"
-              style={styles.continueArrow}
-            />
+            <LinearGradient
+              colors={["#00CFFF", "#2C75FF", "#8C2EFF"]}
+              start={{ x: 0, y: 0.5 }}
+              end={{ x: 1, y: 0.5 }}
+              style={styles.continueGradient}
+            >
+              <Text style={styles.continueText}>Continue</Text>
+              <Ionicons
+                name="arrow-forward"
+                size={29}
+                color={COLORS.text}
+                style={styles.continueArrow}
+              />
+            </LinearGradient>
           </Pressable>
-
-          <View style={styles.bottomSpace} />
-        </ScrollView>
+        </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -540,7 +543,7 @@ const styles = StyleSheet.create({
 
   scrollContent: {
     paddingTop: 7,
-    paddingBottom: 22,
+    paddingBottom: 18,
   },
 
   /* ==========================================================
@@ -548,57 +551,58 @@ const styles = StyleSheet.create({
      ========================================================== */
 
   header: {
-    height: 67,
+    width: "100%",
+    height: 50,
     flexDirection: "row",
     alignItems: "center",
-    marginBottom: 13,
+    justifyContent: "space-between",
   },
 
   backButton: {
-    width: 49,
-    height: 49,
-    borderRadius: 16,
-    borderWidth: 1.2,
-    borderColor: COLORS.border,
-    backgroundColor: "#06151E",
+    width: 48,
+    height: 46,
+    borderRadius: 15,
+    borderWidth: 1.3,
+    borderColor: "#154A5D",
+    backgroundColor: "#061822",
     alignItems: "center",
     justifyContent: "center",
     flexShrink: 0,
   },
 
-  headerCenter: {
+  headerTitleWrap: {
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    paddingHorizontal: 2,
     minWidth: 0,
   },
 
   headerTitle: {
     color: COLORS.text,
-    lineHeight: 32,
-    fontWeight: "700",
+    fontSize: 20,
+    lineHeight: 23,
+    fontWeight: "800",
     letterSpacing: -0.7,
+    includeFontPadding: false,
     textAlign: "center",
   },
 
-  cyanText: {
+  headerTitleAccent: {
     color: COLORS.cyan,
   },
 
   headerSparkle: {
     color: COLORS.cyan,
-    fontSize: 23,
-    fontWeight: "800",
+    fontSize: 17,
+    fontWeight: "900",
   },
 
   creditPill: {
-    height: 43,
-    minWidth: 119,
-    borderRadius: 22,
-    borderWidth: 1.1,
-    borderColor: COLORS.border,
-    backgroundColor: "#061720",
+    height: 40,
+    borderRadius: 17,
+    borderWidth: 1.2,
+    borderColor: "#154A5D",
+    backgroundColor: "#061822",
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
@@ -606,17 +610,23 @@ const styles = StyleSheet.create({
     flexShrink: 0,
   },
 
-  coinImage: {
-    width: 23,
-    height: 23,
+  coinIcon: {
+    width: 20,
+    height: 20,
     marginRight: 4,
   },
 
   creditValue: {
     color: COLORS.text,
-    fontSize: 15,
-    lineHeight: 19,
-    fontWeight: "500",
+    fontSize: 11,
+    fontWeight: "600",
+  },
+
+  creditPlus: {
+    color: COLORS.cyan,
+    fontSize: 20,
+    lineHeight: 28,
+    marginLeft: 6,
   },
 
   /* ==========================================================
@@ -905,20 +915,27 @@ const styles = StyleSheet.create({
      ========================================================== */
 
   continueButton: {
-    height: 49,
-    borderRadius: 25,
-    backgroundColor: COLORS.cyan,
-    alignItems: "center",
-    justifyContent: "center",
-    position: "relative",
+    width: "100%",
+    alignSelf: "stretch",
+    height: 55,
+    minHeight: 55,
+    borderRadius: 28,
+    overflow: "hidden",
     shadowColor: COLORS.cyan,
-    shadowOffset: {
-      width: 0,
-      height: 7,
-    },
+    shadowOffset: { width: 0, height: 7 },
     shadowOpacity: 0.22,
     shadowRadius: 12,
     elevation: 7,
+  },
+
+  continueGradient: {
+    width: "100%",
+    height: 55,
+    minHeight: 55,
+    borderRadius: 28,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
   },
 
   continueDisabled: {
@@ -930,19 +947,24 @@ const styles = StyleSheet.create({
   },
 
   continueText: {
-    color: "#001114",
-    fontSize: 17.5,
-    lineHeight: 22,
+    color: "#FFFFFF",
+    fontSize: 17,
+    lineHeight: 21,
     fontWeight: "700",
+    marginRight: 20,
   },
 
   continueArrow: {
-    position: "absolute",
-    right: 17,
+    marginLeft: 0,
   },
 
-  bottomSpace: {
-    height: 2,
+  fixedBottom: {
+    width: "100%",
+    alignSelf: "stretch",
+    backgroundColor: COLORS.background,
+    paddingHorizontal: 22,
+    paddingTop: 7,
+    paddingBottom: 10,
   },
 
   pressed: {

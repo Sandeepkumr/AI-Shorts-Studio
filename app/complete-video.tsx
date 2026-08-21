@@ -279,6 +279,7 @@ const VideoCompleteScreen = () => {
                             },
                         ]}
                         activeOpacity={0.8}
+                        onPress={() => router.push('/coins')}
                     >
                         <Image
                             source={require('../assets/coin.png')}
@@ -856,28 +857,42 @@ const VideoCompleteScreen = () => {
                                         15 * scale,
                                     marginBottom:
                                         7 * scale,
+                                    overflow: 'hidden',
                                 },
                             ]}
                             activeOpacity={0.85}
                             onPress={() => router.push('/save-video')}
                         >
-                            <Icon
-                                name="download"
-                                size={sizes.actionIcon}
-                                color="#00120F"
-                            />
-
-                            <Text
-                                style={[
-                                    styles.downloadButtonText,
-                                    {
-                                        fontSize:
-                                            sizes.actionText,
-                                    },
-                                ]}
+                            <LinearGradient
+                                colors={['#00CFFF', '#2C75FF', '#8C2EFF']}
+                                start={{ x: 0, y: 0.5 }}
+                                end={{ x: 1, y: 0.5 }}
+                                style={{
+                                    flex: 1,
+                                    flexDirection: 'row',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    borderRadius: 15 * scale,
+                                }}
                             >
-                                Download Video
-                            </Text>
+                                <Icon
+                                    name="download"
+                                    size={sizes.actionIcon}
+                                    color="#00120F"
+                                />
+
+                                <Text
+                                    style={[
+                                        styles.downloadButtonText,
+                                        {
+                                            fontSize:
+                                                sizes.actionText,
+                                        },
+                                    ]}
+                                >
+                                    Download Video
+                                </Text>
+                            </LinearGradient>
                         </TouchableOpacity>
 
                         {/* =================================================
@@ -1434,7 +1449,7 @@ const styles = StyleSheet.create({
 
     downloadButton: {
         width: '100%',
-        backgroundColor: COLORS.primaryBright,
+        backgroundColor: 'transparent',
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',

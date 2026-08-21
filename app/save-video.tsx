@@ -267,6 +267,7 @@ const VideoSavedScreen = () => {
                     <TouchableOpacity
                         activeOpacity={0.8}
                         style={styles.creditsContainer}
+                        onPress={() => router.push('/coins')}
                     >
 
                         <Image

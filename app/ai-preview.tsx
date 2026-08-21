@@ -1,984 +1,1187 @@
-import React, { useMemo, useRef } from "react";
+import React, { useCallback } from 'react';
 import {
   Image,
   Pressable,
   ScrollView,
+  StatusBar,
   StyleSheet,
   Text,
   View,
   useWindowDimensions,
-} from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
-import { Ionicons } from "@expo/vector-icons";
-import { useLocalSearchParams, useRouter } from "expo-router";
-
-/**
- * Shivora — AI Preview
- *
- * File:
- * app/ai-preview.tsx
- *
- * Assets:
- * assets/ai-character-main.png
- * assets/ai-character-shopkeeper.png
- * assets/scene-01.png
- * assets/scene-02.png
- * assets/scene-03.png
- * assets/scene-04.png
- *
- * IMPORTANT:
- * This screen intentionally does NOT use ScrollView.
- * The layout is compact enough to fit on one iPhone screen.
- */
-
-const ASSETS = {
-  mainCharacter: require("../assets/ai-character-main.png"),
-  shopkeeper: require("../assets/ai-character-shopkeeper.png"),
-  scene01: require("../assets/scene-01.png"),
-  scene02: require("../assets/scene-02.png"),
-  scene03: require("../assets/scene-03.png"),
-  scene04: require("../assets/scene-04.png"),
-} as const;
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
+import { useRouter } from 'expo-router';
 
 const COLORS = {
-  background: "#020A10",
-  surface: "#071923",
-  surfaceAlt: "#06151F",
-  text: "#F5F7F8",
-  secondary: "#AAB9C2",
-  muted: "#7E919B",
-  cyan: "#08D9D0",
-  border: "#123B49",
-  borderBright: "#0F5363",
-  successSurface: "#063D37",
-  black: "#001114",
-};
+  background: '#020A12',
+  card: '#04121A',
+  cardSoft: '#061822',
 
-const STORY_FALLBACK =
-  "Ek ladka shop par gaya aur shopkeeper se burger manga.";
+  cyan: '#00E5F5',
+  purple: '#C35CFF',
+  purpleDark: '#211333',
+  green: '#10DFAF',
 
-const STORY_SUMMARY =
-  "A young boy visits a local burger shop and asks the shopkeeper for his favorite burger.";
+  white: '#FFFFFF',
+  black: '#001015',
 
-const CHARACTERS = [
-  {
-    name: "Alex",
-    role: "Main Character",
-    description: "A young boy who loves burgers.",
-    image: ASSETS.mainCharacter,
-  },
-  {
-    name: "Shopkeeper",
-    role: "Supporting Character",
-    description: "A friendly shopkeeper who runs the burger shop.",
-    image: ASSETS.shopkeeper,
-  },
-];
+  textSecondary: '#C6D0D8',
+  textMuted: '#8C99A4',
+  muted: '#8C99A4',
+
+  border: '#183B4A',
+  borderBright: '#154A5D',
+  divider: '#213844',
+} as const;
+
+const ASSETS = {
+  coin: require('../assets/coin.png'),
+  hero: require('../assets/text-video-hero.png'),
+
+  alex: require('../assets/ai-character-main.png'),
+  shopkeeper: require('../assets/shopkeeper-character.png'),
+
+  scene01: require('../assets/scene-01.png'),
+  scene02: require('../assets/scene-02.png'),
+  scene03: require('../assets/scene-03.png'),
+  scene04: require('../assets/scene-04.png'),
+} as const;
 
 const SCENES = [
   {
-    number: "01",
+    id: '01',
     image: ASSETS.scene01,
-    title: "Boy enters a burger shop.",
+    text: 'Alex enters the burger shop.',
   },
   {
-    number: "02",
+    id: '02',
     image: ASSETS.scene02,
-    title: "Boy asks the shopkeeper for his favorite burger.",
+    text: 'Alex asks the shopkeeper for burger.',
   },
   {
-    number: "03",
+    id: '03',
     image: ASSETS.scene03,
-    title: "Shopkeeper prepares the burger.",
+    text: 'Shopkeeper prepares the burger.',
   },
   {
-    number: "04",
+    id: '04',
     image: ASSETS.scene04,
-    title: "Boy receives his burger and is happy.",
+    text: 'Alex receives the burger and is happy.',
   },
 ];
 
-const VIDEO_STYLES = [
-  {
-    icon: "film-outline" as const,
-    label: "3D",
-    subLabel: "Animation",
-  },
-  {
-    icon: "time-outline" as const,
-    label: "~60",
-    subLabel: "Seconds",
-  },
-  {
-    icon: "phone-portrait-outline" as const,
-    label: "9:16",
-    subLabel: "Portrait",
-  },
-  {
-    icon: "pulse-outline" as const,
-    label: "AI Voice",
-    subLabel: "Auto Generated",
-  },
-];
-
-function getStory(value?: string | string[]) {
-  const normalized = Array.isArray(value) ? value[0] : value;
-  return normalized?.trim() || STORY_FALLBACK;
-}
-
-function Sparkle() {
-  return <Text style={styles.sparkle}>✦</Text>;
-}
-
-function SectionTitle({
-  title,
-  right,
-}: {
-  title: string;
-  right?: React.ReactNode;
-}) {
-  return (
-    <View style={styles.sectionHeader}>
-      <View style={styles.sectionTitleWrap}>
-        <Text style={styles.sectionTitle}>{title}</Text>
-        <Sparkle />
-      </View>
-      {right}
-    </View>
-  );
-}
-
-function VideoStyleItem({
-  icon,
-  label,
-  subLabel,
-}: {
-  icon: keyof typeof Ionicons.glyphMap;
-  label: string;
-  subLabel: string;
-}) {
-  return (
-    <View style={styles.videoStyleItem}>
-      <Ionicons name={icon} size={23} color={COLORS.cyan} />
-
-      <Text numberOfLines={1} style={styles.videoStyleLabel}>
-        {label}
-      </Text>
-
-      <Text
-        numberOfLines={2}
-        style={styles.videoStyleSubLabel}
-      >
-        {subLabel}
-      </Text>
-    </View>
-  );
-}
-
-export default function AIPreviewScreen() {
+export default function AIPreviewConfirmationScreen() {
   const router = useRouter();
-  const { width, height } = useWindowDimensions();
-  const params = useLocalSearchParams<{ story?: string | string[] }>();
-  const sceneScrollRef = useRef<ScrollView>(null);
+  const { width } = useWindowDimensions();
 
-  const story = useMemo(
-    () => getStory(params.story),
-    [params.story]
-  );
+  const scale = Math.min(width / 428, 1);
+  const horizontalPadding = width <= 375 ? 16 : 22;
 
-  /*
-   * Base design target: approximately iPhone 390x844.
-   * We keep all vertical sections fixed/compact so the entire
-   * screen fits without scrolling.
-   */
-  const narrow = width <= 375;
-  const short = height <= 760;
+  const handleBack = useCallback(() => {
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      router.replace('/');
+    }
+  }, [router]);
 
-  const horizontalPadding = narrow ? 16 : 20;
-  const contentWidth = width - horizontalPadding * 2;
+  const handleEditCharacters = useCallback(() => {
+    router.push('/select-characters');
+  }, [router]);
 
-  const columnGap = narrow ? 8 : 10;
-  const characterCardWidth =
-    (contentWidth - columnGap) / 2;
+  const handleEditScenes = useCallback(() => {
+    router.push('/view-scenes');
+  }, [router]);
 
-  const characterImageWidth = narrow ? 66 : 72;
-  const characterImageHeight = narrow ? 88 : 96;
+  const handleEditSettings = useCallback(() => {
+    router.back();
+  }, [router]);
 
-  const sceneGap = narrow ? 8 : 10;
-  const sceneCardWidth =
-    (contentWidth - sceneGap) / 2;
-  const sceneImageHeight = narrow ? 88 : 94;
-
-  const verticalTight = short ? 0.92 : 1;
-
-  const handleGenerate = () => {
+  const handleGenerate = useCallback(() => {
     router.push('/video-generating');
-  };
+  }, [router]);
 
   return (
-    <View style={styles.root}>
-      <SafeAreaView
-        edges={["top", "bottom"]}
-        style={styles.safeArea}
-      >
+    <SafeAreaView style={styles.safeArea}>
+      <StatusBar
+        barStyle="light-content"
+        backgroundColor={COLORS.background}
+      />
+
+      <View style={styles.screen}>
+        {/* ======================================================
+            HEADER — SAME REFERENCE SYSTEM
+        ====================================================== */}
+
         <View
           style={[
-            styles.container,
+            styles.header,
             {
               paddingHorizontal: horizontalPadding,
             },
           ]}
         >
-          {/* HEADER */}
-          <View style={[styles.header, { transform: [{ scaleY: verticalTight }] }]}>
-            <Pressable
-              style={styles.backButton}
-              onPress={() => router.back()}
-              hitSlop={8}
+          <Pressable
+            onPress={handleBack}
+            hitSlop={10}
+            style={({ pressed }) => [
+              styles.backButton,
+              pressed && styles.pressed,
+            ]}
+            accessibilityRole="button"
+            accessibilityLabel="Go back"
+          >
+            <Ionicons
+              name="chevron-back"
+              size={33}
+              color={COLORS.white}
+            />
+          </Pressable>
+
+          <View style={styles.headerTitleWrap}>
+            <Text
+              style={styles.headerTitle}
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              minimumFontScale={0.78}
             >
-              <Ionicons
-                name="chevron-back"
-                size={29}
-                color={COLORS.text}
-              />
-            </Pressable>
-
-            <View style={styles.headerTitleWrap}>
-              <Text style={styles.headerTitle}>
-                AI <Text style={styles.cyan}>Preview</Text>
-              </Text>
+              Text to{' '}
+              <Text style={styles.headerTitleAccent}>Video</Text>
               <Text style={styles.headerSparkle}>✦</Text>
-            </View>
+            </Text>
+          </View>
 
-            <View style={styles.creditPill}>
+          <Pressable
+            style={[
+              styles.creditPill,
+              {
+                width: width <= 375 ? 112 : 124,
+              },
+            ]}
+            onPress={() => router.push('/coins')}
+          >
+            <Image
+              source={ASSETS.coin}
+              resizeMode="contain"
+              style={styles.coinIcon}
+            />
+            <Text style={styles.creditValue}>12,450</Text>
+            <Text style={styles.creditPlus}>+</Text>
+          </Pressable>
+        </View>
+
+        {/* ======================================================
+            MAIN SCROLL
+        ====================================================== */}
+
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+          contentContainerStyle={[
+            styles.scrollContent,
+            {
+              paddingHorizontal: horizontalPadding,
+              paddingBottom: 112,
+            },
+          ]}
+        >
+          {/* ====================================================
+              HERO
+          ==================================================== */}
+
+          <View style={styles.heroCard}>
+            <View style={styles.heroIconWrap}>
               <Ionicons
-                name="layers-outline"
-                size={20}
+                name="document-text-outline"
+                size={36}
                 color={COLORS.cyan}
               />
-              <Text style={styles.creditValue}>12,450</Text>
-              <Text style={styles.creditPlus}>+</Text>
+              <Text style={styles.heroSparkOne}>✦</Text>
+              <Text style={styles.heroSparkTwo}>✦</Text>
             </View>
+
+            <View style={styles.heroCopy}>
+              <Text style={styles.heroTitle}>
+                AI Preview
+              </Text>
+
+              <Text style={styles.heroDescription}>
+                Review and confirm the details.
+              </Text>
+
+              <Text style={styles.heroDescription}>
+                You can edit anything before generating.
+              </Text>
+            </View>
+
+            <Image
+              source={ASSETS.hero}
+              resizeMode="contain"
+              style={styles.heroImage}
+            />
           </View>
 
-          <Text style={styles.headerSubtitle}>
-            Shivora has understood your story and{"\n"}
-            created a preview of your video.
-          </Text>
+          {/* ====================================================
+              STORY
+          ==================================================== */}
 
-          {/* STORY */}
-          <View style={styles.storyCard}>
-            <View style={styles.storyHeader}>
-              <View style={styles.storyTitleWrap}>
-                <Text style={styles.storyTitle}>Your Story</Text>
-                <Pressable
-                  onPress={() => router.back()}
-                  hitSlop={8}
-                >
-                  <Ionicons
-                    name="pencil"
-                    size={20}
-                    color={COLORS.cyan}
-                  />
-                </Pressable>
+          <SectionCard>
+            <View style={styles.sectionTopRow}>
+              <View style={styles.sectionTitleRow}>
+                <Text style={styles.sectionTitle}>
+                  Your Story
+                </Text>
+                <Text style={styles.sectionSpark}>✦</Text>
               </View>
 
-              <View style={styles.goodBadge}>
-                <Ionicons
-                  name="checkmark"
-                  size={16}
-                  color={COLORS.cyan}
-                />
-                <Text style={styles.goodBadgeText}>
-                  Story Looks Good
+              <PillButton
+                icon="sparkles-outline"
+                label="AI Summary"
+                color={COLORS.cyan}
+                onPress={() => undefined}
+              />
+            </View>
+
+            <Text style={styles.storyText}>
+              A young boy named Alex visits a local burger shop.
+              {'\n'}
+              He asks the shopkeeper for his favorite burger.
+              {'\n'}
+              The shopkeeper prepares the burger and gives it
+              {'\n'}
+              to Alex. Alex receives the burger and is happy.
+            </Text>
+          </SectionCard>
+
+          {/* ====================================================
+              CHARACTERS
+          ==================================================== */}
+
+          <SectionCard>
+            <View style={styles.sectionTopRow}>
+              <View style={styles.sectionTitleRow}>
+                <Text style={styles.sectionTitle}>
+                  Your Characters (2)
+                </Text>
+                <Text style={styles.sectionSpark}>✦</Text>
+              </View>
+
+              <PillButton
+                icon="create-outline"
+                label="Edit All"
+                color={COLORS.cyan}
+                onPress={handleEditCharacters}
+              />
+            </View>
+
+            <View style={styles.charactersRow}>
+              <CharacterCard
+                image={ASSETS.alex}
+                name="Alex"
+                role="Main Character"
+                description="Young boy with red hair, fair skin, blue hoodie and white sneakers."
+              />
+
+              <CharacterCard
+                image={ASSETS.shopkeeper}
+                name="Shopkeeper"
+                role="Supporting Character"
+                description="Man with black hair, beard and black apron."
+              />
+            </View>
+
+            <View style={styles.characterReuseCard}>
+              <Ionicons
+                name="people-outline"
+                size={34}
+                color={COLORS.cyan}
+              />
+
+              <View style={styles.reuseCopy}>
+                <Text style={styles.reuseTitle}>
+                  Character Reuse
+                </Text>
+                <Text style={styles.reuseDescription}>
+                  These characters are saved in your library.
+                  {'\n'}
+                  You can reuse them in future videos.
                 </Text>
               </View>
-            </View>
 
-            <Text
-              numberOfLines={2}
-              style={styles.storyText}
-            >
-              {story}
-            </Text>
-
-            <Text style={styles.summaryLabel}>
-              AI Summary
-            </Text>
-
-            <Text
-              numberOfLines={2}
-              style={styles.summaryText}
-            >
-              {STORY_SUMMARY}
-            </Text>
-          </View>
-
-          {/* CHARACTERS */}
-          <SectionTitle title="AI Generated Characters" />
-
-          <View
-            style={[
-              styles.characterRow,
-              { gap: columnGap },
-            ]}
-          >
-            {CHARACTERS.map((character) => (
-              <View
-                key={character.name}
-                style={[
-                  styles.characterCard,
-                  { width: characterCardWidth },
+              <Pressable
+                onPress={() => undefined}
+                style={({ pressed }) => [
+                  styles.viewCharactersButton,
+                  pressed && styles.pressed,
                 ]}
               >
-                <Image
-                  source={character.image}
-                  resizeMode="contain"
-                  style={{
-                    width: characterImageWidth,
-                    height: characterImageHeight,
-                  }}
+                <Text style={styles.viewCharactersText}>
+                  View My Characters
+                </Text>
+                <Ionicons
+                  name="chevron-forward"
+                  size={18}
+                  color={COLORS.white}
                 />
+              </Pressable>
+            </View>
+          </SectionCard>
 
-                <View style={styles.characterCopy}>
-                  <Text
-                    numberOfLines={1}
-                    style={styles.characterName}
-                  >
-                    {character.name}
-                  </Text>
+          {/* ====================================================
+              PLANNED SCENES
+          ==================================================== */}
+
+          <SectionCard>
+            <View style={styles.sectionTopRow}>
+              <View style={styles.sectionTitleRow}>
+                <Text style={styles.sectionTitle}>
+                  Planned Scenes (4)
+                </Text>
+                <Text style={styles.sectionSpark}>✦</Text>
+              </View>
+
+              <PillButton
+                icon="create-outline"
+                label="Edit Scenes"
+                color={COLORS.cyan}
+                onPress={handleEditScenes}
+              />
+            </View>
+
+            <View style={styles.sceneGrid}>
+              {SCENES.map((scene) => (
+                <View
+                  key={scene.id}
+                  style={styles.plannedScene}
+                >
+                  <View style={styles.sceneImageWrap}>
+                    <Image
+                      source={scene.image}
+                      resizeMode="cover"
+                      style={styles.sceneImage}
+                    />
+                    <View style={styles.sceneBadge}>
+                      <Text style={styles.sceneBadgeText}>
+                        {scene.id}
+                      </Text>
+                    </View>
+                  </View>
 
                   <Text
-                    numberOfLines={2}
-                    style={styles.characterRole}
+                    style={styles.sceneText}
+                    numberOfLines={3}
                   >
-                    {character.role}
-                  </Text>
-
-                  <Text
-                    numberOfLines={2}
-                    style={styles.characterDescription}
-                  >
-                    {character.description}
+                    {scene.text}
                   </Text>
                 </View>
-              </View>
-            ))}
-          </View>
+              ))}
+            </View>
+          </SectionCard>
 
-          {/* SCENES */}
-          <SectionTitle
-            title="AI Planned Scenes"
-            right={
-              <View style={styles.sceneCount}>
-                <Ionicons
-                  name="film-outline"
-                  size={18}
-                  color={COLORS.cyan}
-                />
-                <Text style={styles.sceneCountText}>
-                  4 Scenes
+          {/* ====================================================
+              VIDEO SETTINGS
+          ==================================================== */}
+
+          <SectionCard>
+            <View style={styles.sectionTopRow}>
+              <View style={styles.sectionTitleRow}>
+                <Text style={styles.sectionTitle}>
+                  Video Settings
                 </Text>
+                <Text style={styles.sectionSpark}>✦</Text>
               </View>
-            }
-          />
 
-          <View style={styles.sceneRowArea}>
-            <ScrollView
-              ref={sceneScrollRef}
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              bounces={false}
-              directionalLockEnabled
-              decelerationRate="fast"
-              snapToInterval={sceneCardWidth * 2 + sceneGap + 16}
-              snapToAlignment="start"
-              contentContainerStyle={{
-                paddingHorizontal: 8,
-              }}
-              style={styles.sceneScroll}
-            >
-              <View
-                style={[
-                  styles.sceneRow,
-                  { gap: sceneGap },
-                ]}
-              >
-                {SCENES.map((scene) => (
-                  <View
-                    key={scene.number}
-                    style={[
-                      styles.sceneItem,
-                      { width: sceneCardWidth },
-                    ]}
-                  >
-                    <View
-                      style={[
-                        styles.sceneImageWrap,
-                        { height: sceneImageHeight },
-                      ]}
-                    >
-                      <Image
-                        source={scene.image}
-                        resizeMode="cover"
-                        style={styles.sceneImage}
-                      />
-
-                      <View style={styles.sceneNumber}>
-                        <Text style={styles.sceneNumberText}>
-                          {scene.number}
-                        </Text>
-                      </View>
-                    </View>
-
-                    <Text
-                      numberOfLines={2}
-                      style={styles.sceneTitle}
-                    >
-                      {scene.title}
-                    </Text>
-                  </View>
-                ))}
-              </View>
-            </ScrollView>
-
-            <Pressable
-              accessibilityLabel="Previous planned scenes"
-              style={[
-                styles.sceneArrow,
-                styles.sceneArrowLeft,
-              ]}
-              onPress={() =>
-                sceneScrollRef.current?.scrollTo({
-                  x: 0,
-                  animated: true,
-                })
-              }
-              hitSlop={8}
-            >
-              <Ionicons
-                name="chevron-back"
-                size={22}
-                color={COLORS.text}
+              <PillButton
+                icon="create-outline"
+                label="Edit"
+                color={COLORS.cyan}
+                onPress={handleEditSettings}
               />
-            </Pressable>
+            </View>
 
-            <Pressable
-              accessibilityLabel="Next planned scenes"
-              style={[
-                styles.sceneArrow,
-                styles.sceneArrowRight,
-              ]}
-              onPress={() =>
-                sceneScrollRef.current?.scrollTo({
-                  x: sceneCardWidth * 2 + sceneGap + 16,
-                  animated: true,
-                })
-              }
-              hitSlop={8}
-            >
-              <Ionicons
-                name="chevron-forward"
-                size={22}
-                color={COLORS.text}
+            <View style={styles.settingsRow}>
+              <SettingItem
+                icon="time-outline"
+                value="30 sec"
+                label="Duration"
               />
-            </Pressable>
-          </View>
 
-          {/* VIDEO STYLE */}
-          <SectionTitle title="Video Style" />
-
-          <View style={styles.videoStyleCard}>
-            {VIDEO_STYLES.map((item) => (
-              <VideoStyleItem
-                key={item.label}
-                icon={item.icon}
-                label={item.label}
-                subLabel={item.subLabel}
+              <SettingItem
+                icon="phone-portrait-outline"
+                value="9:16"
+                label="Portrait"
               />
-            ))}
-          </View>
 
-          {/* GENERATE */}
+              <SettingItem
+                icon="film-outline"
+                value="3D Animation"
+                label="Style"
+              />
+
+              <SettingItem
+                icon="pulse-outline"
+                value="AI Auto"
+                label="Voice"
+              />
+
+              <SettingItem
+                icon="camera-outline"
+                value="Auto"
+                label="Camera"
+              />
+            </View>
+          </SectionCard>
+        </ScrollView>
+
+        {/* ======================================================
+            FIXED GENERATE
+        ====================================================== */}
+
+        <View style={styles.fixedBottom}>
           <Pressable
+            onPress={handleGenerate}
             style={({ pressed }) => [
               styles.generateButton,
               pressed && styles.generatePressed,
             ]}
-            onPress={handleGenerate}
+            accessibilityRole="button"
+            accessibilityLabel="Generate Video"
           >
-            <Ionicons
-              name="play"
-              size={22}
-              color="#FFFFFF"
-            />
+            <LinearGradient
+              colors={['#00CFFF', '#2C75FF', '#8C2EFF']}
+              start={{ x: 0, y: 0.5 }}
+              end={{ x: 1, y: 0.5 }}
+              style={styles.generateGradient}
+            >
+              <Text style={styles.generateText}>
+                Generate Video
+              </Text>
 
-            <Text style={styles.generateText}>
-              Generate Video
-            </Text>
+              <Text style={styles.generateSparkles}>
+                ✦✦
+              </Text>
 
-            <Ionicons
-              name="arrow-forward"
-              size={31}
-              color="#FFFFFF"
-              style={styles.generateArrow}
-            />
+              <Ionicons
+                name="arrow-forward"
+                size={31}
+                color={COLORS.white}
+              />
+            </LinearGradient>
           </Pressable>
 
-          <View style={styles.secureRow}>
+          <View style={styles.footer}>
             <Ionicons
-              name="lock-closed"
-              size={16}
-              color={COLORS.muted}
+              name="lock-closed-outline"
+              size={15}
+              color={COLORS.textMuted}
             />
-            <Text style={styles.secureText}>
-              Your generation is secure and private
+            <Text style={styles.footerText}>
+              Your generation is private and secure.
             </Text>
           </View>
         </View>
-      </SafeAreaView>
+      </View>
+    </SafeAreaView>
+  );
+}
+
+/* ==============================================================
+   SECTION CARD
+============================================================== */
+
+function SectionCard({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  return (
+    <View style={styles.sectionCard}>
+      {children}
     </View>
   );
 }
 
-const styles = StyleSheet.create({
-  root: {
-    flex: 1,
-    backgroundColor: COLORS.background,
-  },
+/* ==============================================================
+   PILL BUTTON
+============================================================== */
 
+function PillButton({
+  icon,
+  label,
+  color,
+  onPress,
+}: {
+  icon: keyof typeof Ionicons.glyphMap;
+  label: string;
+  color: string;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.pillButton,
+        pressed && styles.pressed,
+      ]}
+    >
+      <Ionicons
+        name={icon}
+        size={16}
+        color={color}
+      />
+
+      <Text
+        style={[
+          styles.pillButtonText,
+          {
+            color,
+          },
+        ]}
+      >
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
+
+/* ==============================================================
+   CHARACTER CARD
+============================================================== */
+
+function CharacterCard({
+  image,
+  name,
+  role,
+  description,
+}: {
+  image: any;
+  name: string;
+  role: string;
+  description: string;
+}) {
+  return (
+    <View style={styles.characterCard}>
+      <Image
+        source={image}
+        resizeMode="cover"
+        style={styles.characterImage}
+      />
+
+      <View style={styles.characterCopy}>
+        <Text
+          style={styles.characterName}
+          numberOfLines={1}
+        >
+          {name}
+        </Text>
+
+        <Text style={styles.characterRole}>
+          {role}
+        </Text>
+
+        <Text
+          style={styles.characterDescription}
+          numberOfLines={4}
+        >
+          {description}
+        </Text>
+      </View>
+
+      <View style={styles.savedBadge}>
+        <Ionicons
+          name="checkmark"
+          size={11}
+          color={COLORS.black}
+        />
+        <Text style={styles.savedText}>
+          Saved
+        </Text>
+      </View>
+    </View>
+  );
+}
+
+/* ==============================================================
+   SETTING ITEM
+============================================================== */
+
+function SettingItem({
+  icon,
+  value,
+  label,
+}: {
+  icon: keyof typeof Ionicons.glyphMap;
+  value: string;
+  label: string;
+}) {
+  return (
+    <View style={styles.settingItem}>
+      <Ionicons
+        name={icon}
+        size={27}
+        color={COLORS.cyan}
+      />
+
+      <Text
+        style={styles.settingValue}
+        numberOfLines={2}
+        adjustsFontSizeToFit
+        minimumFontScale={0.65}
+      >
+        {value}
+      </Text>
+
+      <Text
+        style={styles.settingLabel}
+        numberOfLines={2}
+        adjustsFontSizeToFit
+        minimumFontScale={0.65}
+      >
+        {label}
+      </Text>
+    </View>
+  );
+}
+
+/* ==============================================================
+   STYLES
+============================================================== */
+
+const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: COLORS.background,
   },
 
-  container: {
+  screen: {
     flex: 1,
-    paddingTop: 5,
-    paddingBottom: 7,
-    justifyContent: "space-between",
+    backgroundColor: COLORS.background,
   },
 
-  /* HEADER */
+  pressed: {
+    opacity: 0.72,
+  },
+
+  /* ============================================================
+     HEADER — REFERENCE
+  ============================================================ */
+
   header: {
-    minHeight: 50,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
+    height: 50,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
   },
 
   backButton: {
-    width: 47,
-    height: 47,
+    width: 48,
+    height: 46,
     borderRadius: 15,
-    borderWidth: 1.2,
-    borderColor: COLORS.borderBright,
-    backgroundColor: COLORS.surfaceAlt,
-    alignItems: "center",
-    justifyContent: "center",
-    flexShrink: 0,
+    borderWidth: 1.3,
+    borderColor: '#154A5D',
+    backgroundColor: '#061822',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 
   headerTitleWrap: {
     flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    marginHorizontal: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: 0,
   },
 
   headerTitle: {
-    color: COLORS.text,
-    fontSize: 24,
-    lineHeight: 29,
-    fontWeight: "700",
-    letterSpacing: -0.5,
+    color: COLORS.white,
+    fontSize: 20,
+    lineHeight: 23,
+    fontWeight: '800',
+    letterSpacing: -0.7,
+    includeFontPadding: false,
+    textAlign: 'center',
   },
 
-  cyan: {
+  headerTitleAccent: {
     color: COLORS.cyan,
   },
 
   headerSparkle: {
     color: COLORS.cyan,
-    fontSize: 22,
-    lineHeight: 24,
-    marginLeft: 3,
-    marginTop: -13,
+    fontSize: 17,
+    fontWeight: '900',
   },
 
   creditPill: {
     height: 40,
-    minWidth: 113,
-    borderRadius: 20,
-    borderWidth: 1.1,
-    borderColor: COLORS.border,
-    backgroundColor: COLORS.surfaceAlt,
+    borderRadius: 17,
+    borderWidth: 1.2,
+    borderColor: '#154A5D',
+    backgroundColor: '#061822',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
     paddingHorizontal: 9,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    flexShrink: 0,
+  },
+
+  coinIcon: {
+    width: 20,
+    height: 20,
+    marginRight: 4,
   },
 
   creditValue: {
-    marginLeft: 5,
-    color: COLORS.text,
-    fontSize: 14,
-    lineHeight: 18,
-    fontWeight: "500",
+    color: COLORS.white,
+    fontSize: 11,
+    fontWeight: '600',
   },
 
   creditPlus: {
-    marginLeft: 4,
     color: COLORS.cyan,
-    fontSize: 23,
-    lineHeight: 26,
-    fontWeight: "300",
+    fontSize: 20,
+    lineHeight: 28,
+    marginLeft: 6,
   },
 
-  headerSubtitle: {
-    marginTop: 2,
-    color: COLORS.secondary,
-    fontSize: 12.5,
-    lineHeight: 17,
-    textAlign: "center",
-  },
+  /* ============================================================
+     MAIN
+  ============================================================ */
 
-  /* STORY */
-  storyCard: {
-    minHeight: 103,
-    borderRadius: 16,
-    borderWidth: 1.15,
-    borderColor: COLORS.border,
-    backgroundColor: COLORS.surface,
-    paddingHorizontal: 14,
-    paddingVertical: 11,
-  },
-
-  storyHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-
-  storyTitleWrap: {
-    flexDirection: "row",
-    alignItems: "center",
+  scrollContent: {
+    paddingTop: 11,
     gap: 7,
-    flexShrink: 1,
   },
 
-  storyTitle: {
-    color: COLORS.text,
-    fontSize: 18,
-    lineHeight: 22,
-    fontWeight: "700",
+  /* ============================================================
+     HERO
+  ============================================================ */
+
+  heroCard: {
+    minHeight: 101,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#4F39A2',
+    backgroundColor: '#030E1B',
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    overflow: 'hidden',
   },
 
-  goodBadge: {
-    height: 32,
-    paddingHorizontal: 10,
-    borderRadius: 16,
-    borderWidth: 1.1,
-    borderColor: COLORS.cyan,
-    backgroundColor: COLORS.successSurface,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
+  heroIconWrap: {
+    width: 70,
+    height: 75,
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'relative',
     flexShrink: 0,
   },
 
-  goodBadgeText: {
+  heroSparkOne: {
+    position: 'absolute',
+    top: 7,
+    left: 1,
     color: COLORS.cyan,
-    fontSize: 10,
-    lineHeight: 14,
-    fontWeight: "600",
+    fontSize: 15,
   },
 
-  storyText: {
-    marginTop: 8,
-    color: COLORS.text,
-    fontSize: 12.5,
+  heroSparkTwo: {
+    position: 'absolute',
+    bottom: 2,
+    right: 0,
+    color: COLORS.cyan,
+    fontSize: 13,
+  },
+
+  heroCopy: {
+    flex: 1,
+    minWidth: 0,
+    paddingHorizontal: 7,
+  },
+
+  heroTitle: {
+    color: COLORS.white,
+    fontSize: 17,
+    lineHeight: 21,
+    fontWeight: '800',
+    marginBottom: 7,
+  },
+
+  heroDescription: {
+    color: COLORS.textSecondary,
+    fontSize: 11.2,
     lineHeight: 17,
   },
 
-  summaryLabel: {
-    marginTop: 8,
-    color: COLORS.cyan,
-    fontSize: 11.5,
-    lineHeight: 15,
+  heroImage: {
+    width: 175,
+    height: 96,
+    marginRight: -7,
+    flexShrink: 0,
   },
 
-  summaryText: {
-    marginTop: 3,
-    color: COLORS.text,
-    fontSize: 12.5,
-    lineHeight: 17,
+  /* ============================================================
+     GENERIC CARD
+  ============================================================ */
+
+  sectionCard: {
+    width: '100%',
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 14,
+    backgroundColor: COLORS.card,
+    padding: 10,
   },
 
-  /* SECTION */
-  sectionHeader: {
-    minHeight: 28,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
+  sectionTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
   },
 
-  sectionTitleWrap: {
-    flexDirection: "row",
-    alignItems: "center",
+  sectionTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
     minWidth: 0,
     flexShrink: 1,
   },
 
   sectionTitle: {
-    color: COLORS.text,
-    fontSize: 21,
-    lineHeight: 25,
-    fontWeight: "700",
-    letterSpacing: -0.35,
+    color: COLORS.white,
+    fontSize: 14.5,
+    lineHeight: 18,
+    fontWeight: '700',
   },
 
-  sparkle: {
+  sectionSpark: {
     color: COLORS.cyan,
-    fontSize: 25,
-    lineHeight: 27,
-    marginLeft: 6,
-    marginTop: -6,
+    fontSize: 16,
+    marginLeft: 5,
   },
 
-  /* CHARACTERS */
-  characterRow: {
-    flexDirection: "row",
+  pillButton: {
+    minHeight: 32,
+    borderWidth: 1,
+    borderColor: COLORS.borderBright,
+    borderRadius: 14,
+    backgroundColor: '#031721',
+    paddingHorizontal: 9,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 5,
+    flexShrink: 0,
+  },
+
+  pillButtonText: {
+    fontSize: 9.5,
+    fontWeight: '600',
+  },
+
+  /* ============================================================
+     STORY
+  ============================================================ */
+
+  storyText: {
+    color: COLORS.textSecondary,
+    fontSize: 12.2,
+    lineHeight: 19,
+    marginTop: 10,
+  },
+
+  /* ============================================================
+     CHARACTERS
+  ============================================================ */
+
+  charactersRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 10,
   },
 
   characterCard: {
-    height: 116,
-    borderRadius: 16,
-    borderWidth: 1.15,
+    flex: 1,
+    minWidth: 0,
+    minHeight: 137,
+    borderRadius: 11,
+    borderWidth: 1,
     borderColor: COLORS.border,
-    backgroundColor: COLORS.surface,
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 7,
-    overflow: "hidden",
+    backgroundColor: COLORS.cardSoft,
+    padding: 8,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    position: 'relative',
+    overflow: 'hidden',
+  },
+
+  characterImage: {
+    width: 70,
+    height: 88,
+    borderRadius: 9,
+    backgroundColor: '#0A1820',
+    flexShrink: 0,
   },
 
   characterCopy: {
     flex: 1,
     minWidth: 0,
-    paddingLeft: 6,
-    paddingRight: 3,
+    paddingLeft: 8,
+    paddingRight: 2,
   },
 
   characterName: {
-    color: COLORS.text,
-    fontSize: 16,
-    lineHeight: 20,
-    fontWeight: "700",
+    color: COLORS.white,
+    fontSize: 14,
+    lineHeight: 18,
+    fontWeight: '700',
   },
 
   characterRole: {
-    marginTop: 2,
     color: COLORS.cyan,
-    fontSize: 10.5,
-    lineHeight: 14,
+    fontSize: 9.5,
+    lineHeight: 12,
+    marginTop: 4,
   },
 
   characterDescription: {
-    marginTop: 5,
-    color: COLORS.secondary,
-    fontSize: 10.5,
-    lineHeight: 15,
+    color: COLORS.textSecondary,
+    fontSize: 9.5,
+    lineHeight: 14,
+    marginTop: 8,
   },
 
-  /* SCENES */
-  sceneCount: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 5,
+  savedBadge: {
+    position: 'absolute',
+    left: 8,
+    bottom: 8,
+    height: 24,
+    paddingHorizontal: 7,
+    borderRadius: 12,
+    backgroundColor: '#062B35',
+    borderWidth: 1,
+    borderColor: '#0A7180',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
   },
 
-  sceneCountText: {
-    color: COLORS.secondary,
+  savedText: {
+    color: COLORS.cyan,
+    fontSize: 8.5,
+    fontWeight: '600',
+  },
+
+  characterReuseCard: {
+    marginTop: 10,
+    minHeight: 70,
+    borderRadius: 11,
+    borderWidth: 1,
+    borderColor: COLORS.purple,
+    backgroundColor: '#0B0B25',
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+  },
+
+  reuseCopy: {
+    flex: 1,
+    minWidth: 0,
+    marginLeft: 9,
+  },
+
+  reuseTitle: {
+    color: COLORS.white,
     fontSize: 13,
-    lineHeight: 17,
+    lineHeight: 16,
+    fontWeight: '700',
   },
 
-  sceneRowArea: {
-    position: "relative",
-    width: "100%",
-    overflow: "hidden",
+  reuseDescription: {
+    color: COLORS.textSecondary,
+    fontSize: 9.5,
+    lineHeight: 14,
+    marginTop: 3,
   },
 
-  sceneScroll: {
-    width: "100%",
-  },
-
-  sceneRow: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-  },
-
-  sceneItem: {
+  viewCharactersButton: {
+    minWidth: 120,
+    height: 38,
+    borderRadius: 19,
+    borderWidth: 1,
+    borderColor: '#5934A0',
+    backgroundColor: '#18112D',
+    paddingHorizontal: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
     flexShrink: 0,
   },
 
+  viewCharactersText: {
+    color: COLORS.white,
+    fontSize: 9,
+    fontWeight: '600',
+  },
+
+  /* ============================================================
+     PLANNED SCENES
+  ============================================================ */
+
+  sceneGrid: {
+    flexDirection: 'row',
+    gap: 7,
+    marginTop: 10,
+  },
+
+  plannedScene: {
+    flex: 1,
+    minWidth: 0,
+  },
+
   sceneImageWrap: {
-    width: "100%",
-    borderRadius: 12,
-    borderWidth: 1.15,
-    borderColor: COLORS.border,
-    backgroundColor: COLORS.surface,
-    overflow: "hidden",
-    position: "relative",
+    width: '100%',
+    aspectRatio: 1.18,
+    borderRadius: 8,
+    overflow: 'hidden',
+    position: 'relative',
+    backgroundColor: '#0A1820',
   },
 
   sceneImage: {
-    width: "100%",
-    height: "100%",
+    width: '100%',
+    height: '100%',
   },
 
-  sceneNumber: {
-    position: "absolute",
-    left: 7,
-    top: 7,
-    width: 31,
-    height: 31,
-    borderRadius: 16,
-    borderWidth: 1.6,
-    borderColor: COLORS.cyan,
-    backgroundColor: "#06333F",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-
-  sceneNumberText: {
-    color: COLORS.cyan,
-    fontSize: 11.5,
-    lineHeight: 15,
-    fontWeight: "700",
-  },
-
-  sceneTitle: {
-    marginTop: 4,
-    minHeight: 30,
-    color: COLORS.text,
-    fontSize: 10.5,
-    lineHeight: 14,
-    paddingHorizontal: 1,
-  },
-
-  sceneArrow: {
-    position: "absolute",
-    top: 28,
-    width: 32,
-    height: 40,
-    borderRadius: 20,
-    zIndex: 10,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "rgba(2, 10, 16, 0.86)",
+  sceneBadge: {
+    position: 'absolute',
+    left: 4,
+    top: 4,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: '#061822',
     borderWidth: 1,
-    borderColor: COLORS.borderBright,
+    borderColor: COLORS.cyan,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 
-  sceneArrowLeft: {
-    left: 0,
+  sceneBadgeText: {
+    color: COLORS.cyan,
+    fontSize: 10,
+    fontWeight: '700',
   },
 
-  sceneArrowRight: {
-    right: 0,
+  sceneText: {
+    color: COLORS.textSecondary,
+    fontSize: 9.5,
+    lineHeight: 14,
+    marginTop: 6,
   },
 
-  /* VIDEO STYLE */
-  videoStyleCard: {
-    height: 74,
-    borderRadius: 15,
-    borderWidth: 1.15,
-    borderColor: COLORS.border,
-    backgroundColor: COLORS.surface,
-    paddingHorizontal: 7,
-    paddingVertical: 7,
-    flexDirection: "row",
-    gap: 6,
+  /* ============================================================
+     VIDEO SETTINGS
+  ============================================================ */
+
+  settingsRow: {
+    flexDirection: 'row',
+    gap: 7,
+    marginTop: 10,
   },
 
-  videoStyleItem: {
+  settingItem: {
     flex: 1,
     minWidth: 0,
-    borderRadius: 11,
+    minHeight: 88,
+    borderRadius: 10,
     borderWidth: 1,
     borderColor: COLORS.border,
-    backgroundColor: COLORS.surfaceAlt,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 2,
+    backgroundColor: COLORS.cardSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 4,
   },
 
-  videoStyleLabel: {
-    marginTop: 3,
-    color: COLORS.text,
-    fontSize: 10,
-    lineHeight: 13,
-    fontWeight: "600",
-    textAlign: "center",
+  settingValue: {
+    color: COLORS.white,
+    fontSize: 10.5,
+    lineHeight: 14,
+    textAlign: 'center',
+    marginTop: 6,
+    fontWeight: '500',
   },
 
-  videoStyleSubLabel: {
-    color: COLORS.secondary,
-    fontSize: 8,
-    lineHeight: 11,
-    textAlign: "center",
+  settingLabel: {
+    color: COLORS.textSecondary,
+    fontSize: 9,
+    lineHeight: 12,
+    textAlign: 'center',
+    marginTop: 2,
   },
 
-  /* GENERATE */
+  /* ============================================================
+     FIXED GENERATE
+  ============================================================ */
+
+  fixedBottom: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: COLORS.background,
+    paddingHorizontal: 14,
+    paddingTop: 6,
+    paddingBottom: 6,
+  },
+
   generateButton: {
-    height: 59,
-    borderRadius: 30,
-    backgroundColor: COLORS.cyan,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    position: "relative",
-    shadowColor: COLORS.cyan,
-    shadowOffset: {
-      width: 0,
-      height: 6,
-    },
-    shadowOpacity: 0.28,
-    shadowRadius: 13,
-    elevation: 7,
+    width: '100%',
+    height: 55,
+    borderRadius: 28,
+    overflow: 'hidden',
   },
 
   generatePressed: {
-    opacity: 0.88,
+    opacity: 0.9,
+    transform: [{ scale: 0.985 }],
+  },
+
+  generateGradient: {
+    flex: 1,
+    borderRadius: 28,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 
   generateText: {
-    marginLeft: 10,
-    color: COLORS.black,
+    color: COLORS.white,
+    fontSize: 17,
+    lineHeight: 21,
+    fontWeight: '700',
+    marginRight: 10,
+  },
+
+  generateSparkles: {
+    color: COLORS.white,
     fontSize: 18,
-    lineHeight: 23,
-    fontWeight: "800",
+    fontWeight: '700',
+    marginRight: 14,
   },
 
-  generateArrow: {
-    position: "absolute",
-    right: 16,
-  },
-
-  secureRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
+  footer: {
+    height: 27,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
     gap: 5,
   },
 
-  secureText: {
-    color: COLORS.muted,
+  footerText: {
+    color: COLORS.textMuted,
     fontSize: 9.5,
-    lineHeight: 13,
   },
 });

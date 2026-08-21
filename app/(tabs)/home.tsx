@@ -143,14 +143,14 @@ export default function HomeScreen() {
 
   const openCreation = (type: CreationType) => {
     setCreateModalVisible(false);
+    console.log("openCreation called with type:", type);
 
     if (type === "text") {
-      router.push("/create video screen text to video");
-
+      router.push("/create-video-screen-t2v");
       return;
     }
 
-    router.push("/add-story-image-to-video");
+    router.push("/add-story-image-to-video" as any);
   };
 
   const goToProjects = () => {
@@ -161,8 +161,12 @@ export default function HomeScreen() {
     router.push("/credits");
   };
 
+  const goToCharacters = () => {
+    router.push("/characters");
+  };
+
   const goToProfile = () => {
-    router.push("/profile");
+    router.push("/My Account" as any);
   };
 
   /* =======================================================
@@ -463,7 +467,7 @@ export default function HomeScreen() {
       <BottomNavigation
         onCreate={() => setCreateModalVisible(true)}
         onProjects={goToProjects}
-        onCredits={goToCredits}
+        onCharacters={goToCharacters}
         onProfile={goToProfile}
       />
 
@@ -572,12 +576,12 @@ function ProjectCard({
 function BottomNavigation({
   onCreate,
   onProjects,
-  onCredits,
+  onCharacters,
   onProfile,
 }: {
   onCreate: () => void;
   onProjects: () => void;
-  onCredits: () => void;
+  onCharacters: () => void;
   onProfile: () => void;
 }) {
   return (
@@ -608,14 +612,15 @@ function BottomNavigation({
       </Pressable>
 
       <BottomItem
-        icon="wallet-outline"
-        label="Credits"
-        onPress={onCredits}
+        icon="people-outline"
+        activeIcon="people"
+        label="Characters"
+        onPress={onCharacters}
       />
 
       <BottomItem
         icon="person-outline"
-        label="Profile"
+        label="My Account"
         onPress={onProfile}
       />
     </View>
@@ -1360,17 +1365,20 @@ const styles = StyleSheet.create({
     borderTopColor: "#102D38",
     flexDirection: "row",
     alignItems: "flex-end",
-    justifyContent: "space-around",
+    justifyContent: "space-between",
+    paddingHorizontal: 4,
     paddingBottom:
       Platform.OS === "ios" ? 5 : 4,
     zIndex: 50,
   },
 
   bottomItem: {
-    width: 56,
+    flex: 1,
+    minWidth: 0,
     height: 49,
     alignItems: "center",
     justifyContent: "flex-end",
+    paddingHorizontal: 2,
     paddingBottom: 1,
   },
 
@@ -1380,6 +1388,8 @@ const styles = StyleSheet.create({
     fontSize: 9,
     lineHeight: 12,
     fontWeight: "500",
+    textAlign: "center",
+    width: "100%",
   },
 
   bottomLabelActive: {
