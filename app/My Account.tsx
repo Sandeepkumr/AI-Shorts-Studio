@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useCallback, useState } from "react";
 import {
   Alert,
   Image,
@@ -14,7 +14,8 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useRouter } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
+import { authService } from "../src/services/auth/authService";
 
 /*
  * ============================================================
@@ -108,7 +109,64 @@ export default function MyAccountScreen() {
   const router = useRouter();
   const { width } = useWindowDimensions();
 
-  const profile = getProfileSession();
+  const [profile, setProfile] = useState<ShivoraProfileSession>(
+    getProfileSession(),
+  );
+
+  useFocusEffect(
+    useCallback(() => {
+      let mounted = true;
+
+      const loadProfile = async () => {
+        try {
+          const user = await authService.getCurrentUser();
+
+          if (!mounted || !user || user.isGuest) {
+            return;
+          }
+
+          const currentProfile =
+            getProfileSession();
+
+          const latestProfile: ShivoraProfileSession = {
+            phone: user.phone ?? currentProfile.phone ?? "",
+            name: user.name ?? currentProfile.name ?? "",
+            email: user.email ?? currentProfile.email ?? "",
+            avatar:
+              user.profileImageUrl ??
+              (typeof currentProfile.avatar === "string"
+                ? currentProfile.avatar
+                : ASSETS.userAvatar),
+          };
+
+          console.log(
+            "[MY ACCOUNT] latest profile:",
+            latestProfile,
+          );
+          console.log(
+            "[MY ACCOUNT] profile avatar:",
+            latestProfile.avatar,
+          );
+
+          setProfile(latestProfile);
+
+          const root = globalThis as typeof globalThis & {
+            __shivoraProfile?: ShivoraProfileSession;
+          };
+
+          root.__shivoraProfile = latestProfile;
+        } catch (error) {
+          console.error("My Account profile load error:", error);
+        }
+      };
+
+      void loadProfile();
+
+      return () => {
+        mounted = false;
+      };
+    }, []),
+  );
 
   const isSmall = width <= 375;
   const isLarge = width >= 430;
@@ -154,17 +212,7 @@ export default function MyAccountScreen() {
   };
 
   const openEditProfile = () => {
-    const latestProfile = getProfileSession();
-
-    router.push({
-      pathname: "/auth/create-profile-setup" as any,
-      params: {
-        mode: "edit",
-        editName: latestProfile.name,
-        editEmail: latestProfile.email,
-        phone: latestProfile.phone,
-      },
-    });
+    router.push("/auth/edit-profile" as any);
   };
 
   const openSettings = () => {
@@ -185,13 +233,19 @@ export default function MyAccountScreen() {
     );
   };
 
-  const confirmLogout = () => {
+  const confirmLogout = async () => {
     setLogoutVisible(false);
 
-    Alert.alert(
-      "Logged Out",
-      "Connect this action to your auth sign-out service."
-    );
+    try {
+      await authService.logout();
+      router.replace("/auth/login" as any);
+    } catch (error) {
+      console.error("Logout failed:", error);
+      Alert.alert(
+        "Logout Error",
+        "An error occurred while logging out. Please try again."
+      );
+    }
   };
 
   const AccountRow = ({
@@ -322,28 +376,21 @@ export default function MyAccountScreen() {
               >
                 <View style={styles.avatarInner}>
                   <Image
-                    source={profile.avatar || ASSETS.userAvatar}
+                    key={
+                      typeof profile.avatar === "string"
+                        ? profile.avatar
+                        : "default-avatar"
+                    }
+                    source={
+                      typeof profile.avatar === "string"
+                        ? { uri: profile.avatar }
+                        : ASSETS.userAvatar
+                    }
                     resizeMode="cover"
                     style={styles.avatar}
                   />
                 </View>
               </LinearGradient>
-
-              <Pressable
-                onPress={openEditProfile}
-                style={({ pressed }) => [
-                  styles.cameraButton,
-                  pressed && styles.pressed,
-                ]}
-                accessibilityRole="button"
-                accessibilityLabel="Change profile photo"
-              >
-                <Ionicons
-                  name="camera-outline"
-                  size={17}
-                  color="#031013"
-                />
-              </Pressable>
             </View>
 
             <View style={styles.identityCopy}>
@@ -731,20 +778,6 @@ const styles = StyleSheet.create({
   avatar: {
     width: "100%",
     height: "100%",
-  },
-
-  cameraButton: {
-    position: "absolute",
-    right: -1,
-    bottom: 2,
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    borderWidth: 1.2,
-    borderColor: "#7CF2EE",
-    backgroundColor: COLORS.cyan,
-    alignItems: "center",
-    justifyContent: "center",
   },
 
   identityCopy: {

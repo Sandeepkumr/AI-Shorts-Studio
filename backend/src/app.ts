@@ -10,13 +10,17 @@ import { projectRouter } from "./routes/project.routes.js";
 import { promptRouter } from "./routes/prompt.routes.js";
 import { videoRouter } from "./routes/video.routes.js";
 import { voiceRouter } from "./routes/voice.routes.js";
+import { authRouter } from "./routes/auth.routes.js";
 
 export const app = express();
 
 app.use(express.json());
 app.use(loggerMiddleware);
 
+app.use("/uploads", express.static("uploads"));
+
 app.use("/health", healthRouter);
+app.use("/auth", authRouter);
 app.use("/prompt", promptRouter);
 app.use("/images", imageRouter);
 app.use("/voice", voiceRouter);

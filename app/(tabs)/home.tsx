@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   Image,
   Modal,
@@ -12,7 +12,8 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
+import { authService } from "../../src/services/auth/authService";
 
 /* =========================================================
    ASSETS
@@ -119,6 +120,37 @@ export default function HomeScreen() {
   const [createModalVisible, setCreateModalVisible] =
     useState(false);
 
+  const [profileName, setProfileName] = useState("Deepak");
+  const [profileImageUrl, setProfileImageUrl] =
+    useState<string | null>(null);
+
+  useFocusEffect(
+    React.useCallback(() => {
+      let mounted = true;
+
+      const loadProfile = async () => {
+        try {
+          const user = await authService.getCurrentUser();
+
+          if (!mounted || !user || user.isGuest) {
+            return;
+          }
+
+          setProfileName(user.name?.trim() || "Deepak");
+          setProfileImageUrl(user.profileImageUrl ?? null);
+        } catch (error) {
+          console.error("Home profile load error:", error);
+        }
+      };
+
+      void loadProfile();
+
+      return () => {
+        mounted = false;
+      };
+    }, []),
+  );
+
   /* =======================================================
      RESPONSIVE VALUES
      ======================================================= */
@@ -199,7 +231,7 @@ export default function HomeScreen() {
                 numberOfLines={1}
                 style={styles.greeting}
               >
-                Good morning, Deepak 👋
+                Good morning, {profileName} 👋
               </Text>
 
               <Text
@@ -230,7 +262,12 @@ export default function HomeScreen() {
                 onPress={goToProfile}
               >
                 <Image
-                  source={USER_AVATAR}
+                  key={profileImageUrl ?? "default-avatar"}
+                  source={
+                    profileImageUrl
+                      ? { uri: profileImageUrl }
+                      : USER_AVATAR
+                  }
                   style={styles.avatar}
                   resizeMode="cover"
                 />
