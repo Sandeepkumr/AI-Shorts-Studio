@@ -6,7 +6,6 @@ import {
   Keyboard,
   Pressable,
   StyleSheet,
-  TouchableWithoutFeedback,
   Text,
   TextInput,
   View,
@@ -325,9 +324,7 @@ export default function ProfileSetupScreen() {
     dismissKeyboard();
 
     if (!canContinue) {
-      setError(
-        "Please enter your name to continue.",
-      );
+      setError("Please enter your name to continue.");
       return;
     }
 
@@ -335,24 +332,59 @@ export default function ProfileSetupScreen() {
     setIsSubmitting(true);
 
     try {
-      /*
-       * Preserve existing profile completion flow.
-       * The profile image is selected locally for now.
-       */
+      let profileImageUrl: string | undefined;
+
+      if (profileImage) {
+        const formData = new FormData();
+
+        formData.append(
+          "image",
+          {
+            uri: profileImage,
+            name: `profile-${Date.now()}.jpg`,
+            type: "image/jpeg",
+          } as any,
+        );
+
+        const uploadResponse = await fetch(
+          "http://192.168.31.189:4000/auth/profile-image",
+          {
+            method: "POST",
+            body: formData,
+          },
+        );
+
+        const uploadData = (await uploadResponse.json()) as {
+          success: boolean;
+          imageUrl?: string;
+          message?: string;
+        };
+
+        if (
+          !uploadResponse.ok ||
+          !uploadData.success ||
+          !uploadData.imageUrl
+        ) {
+          throw new Error(
+            uploadData.message ??
+              "Unable to upload profile photo.",
+          );
+        }
+
+        profileImageUrl =
+          `http://192.168.31.189:4000${uploadData.imageUrl}`;
+      }
+
       await authService.completeProfile({
         name: name.trim(),
+        email: email.trim() || undefined,
         username: "",
+        profileImageUrl,
       });
 
-      /*
-       * Open home.tsx after successful profile creation.
-       */
       router.replace("/(tabs)/home");
     } catch (saveError) {
-      console.error(
-        "Profile save error:",
-        saveError,
-      );
+      console.error("Profile save error:", saveError);
 
       setError(
         saveError instanceof Error
@@ -387,11 +419,7 @@ export default function ProfileSetupScreen() {
       edges={["top", "bottom"]}
       style={styles.safeArea}
     >
-      <TouchableWithoutFeedback
-        onPress={dismissKeyboard}
-        accessible={false}
-      >
-        <View style={styles.screen}>
+      <View style={styles.screen}>
         {/* ==================================================
             BACKGROUND
         ================================================== */}
@@ -695,6 +723,11 @@ export default function ProfileSetupScreen() {
                   autoCapitalize="words"
                   autoCorrect={false}
                   showSoftInputOnFocus
+                  onTouchStart={() => {
+                    requestAnimationFrame(() => {
+                      nameInputRef.current?.focus();
+                    });
+                  }}
                   onBlur={() =>
                     setFocusedField(
                       null,
@@ -773,6 +806,12 @@ export default function ProfileSetupScreen() {
                   autoCapitalize="none"
                   autoCorrect={false}
                   keyboardType="email-address"
+                  showSoftInputOnFocus
+                  onTouchStart={() => {
+                    requestAnimationFrame(() => {
+                      emailInputRef.current?.focus();
+                    });
+                  }}
                   onBlur={() =>
                     setFocusedField(
                       null,
@@ -999,8 +1038,7 @@ export default function ProfileSetupScreen() {
           resizeMode="stretch"
           style={styles.bottomReel}
         />
-        </View>
-      </TouchableWithoutFeedback>
+      </View>
     </SafeAreaView>
   );
 }
