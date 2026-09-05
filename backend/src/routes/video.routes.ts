@@ -1,8 +1,27 @@
 import { Router } from "express";
 
-import { generateVideo } from "../controllers/video.controller.js";
-import { asyncHandler } from "../utils/async-handler.js";
+import {
+  generateVideo,
+  getVideoGenerationStatus,
+} from "../controllers/video.controller.js";
 
-export const videoRouter = Router();
+import {
+  asyncHandler,
+} from "../utils/async-handler.js";
 
-videoRouter.post("/generate", asyncHandler(generateVideo));
+export const videoRouter =
+  Router();
+
+videoRouter.post(
+  "/generate",
+  asyncHandler(
+    generateVideo,
+  ),
+);
+
+videoRouter.get(
+  "/status/:jobId",
+  asyncHandler(
+    getVideoGenerationStatus,
+  ),
+);

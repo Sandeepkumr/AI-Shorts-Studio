@@ -1,0 +1,527 @@
+import OpenAI from "openai";
+
+import type {
+  StoryAnalysisProvider,
+  StoryAnalysisResult,
+} from "./storyAnalysisProvider.js";
+
+const STORY_ANALYSIS_MODEL =
+  process.env.OPENAI_STORY_MODEL ||
+  "gpt-4.1-mini";
+
+const MAX_RETRIES = 3;
+
+const RETRY_DELAYS_MS = [
+  2_000,
+  4_000,
+  8_000,
+];
+
+const systemInstruction = `
+You are a professional storyboard and character planner for an AI video generator.
+
+Analyze the user's story and create a production-ready structured plan that can be passed directly to a video generation engine.
+
+Return ONLY valid JSON with this exact shape:
+{
+  "title": "string",
+  "summary": "string",
+  "characters": [
+    {
+      "id": "character-1",
+      "name": "string",
+      "role": "string",
+      "visualDescription": "string",
+      "imagePrompt": "string"
+    }
+  ],
+  "scenes": [
+    {
+      "sceneNumber": 1,
+      "title": "string",
+      "description": "string",
+      "narration": "string",
+      "durationSeconds": 5,
+      "visibleCharacterIds": ["character-1", "character-2"],
+      "actions": [
+        "string"
+      ],
+      "startState": "string",
+      "endState": "string"
+    }
+  ]
+}
+
+IMPORTANT:
+- Story analysis ONLY.
+- Do NOT generate character images.
+- Do NOT save characters.
+- Do NOT return image URLs.
+- Character images are resolved later during Customize Story / video generation.
+
+CHARACTER RULES:
+- Identify every distinct story character that directly acts, reacts, speaks, is cared for, or is important to the plot.
+- This includes people and animals.
+- Plot-important animals must be included.
+- Do not create separate characters for crowds, background people, or unnamed extras that do not affect the story.
+- Give every detected character one stable ID such as character-1, character-2, character-3.
+- Never create two characters for the same story entity.
+- "role" should clearly identify the character's story role.
+- "visualDescription" must describe stable identity traits: age or life stage, species, face, hair/fur, body type, clothing, colors, accessories, and other defining traits.
+- "imagePrompt" must describe ONE character only.
+- "imagePrompt" must request a full-body character reference on a simple neutral background.
+- Do not describe a scene, crowd, or multiple characters inside imagePrompt.
+- Do not invent unnecessary characters.
+
+SCENE RULES:
+- Preserve the user's story meaning and chronology.
+- Create 3 to 8 meaningful scenes depending on story length.
+- Do not invent filler events just to increase the scene count.
+- Each scene must represent one coherent visual story beat.
+- Each scene must move the story forward.
+- Descriptions must be visual and suitable for animation.
+- Narration must describe what the viewer should actually see in that scene.
+- Keep narration concise enough for short-form video.
+- durationSeconds must be between 3 and 10.
+- sceneNumber must start at 1 and increase sequentially.
+
+VISIBLE CHARACTER RULES:
+- visibleCharacterIds must contain ONLY the IDs of characters visibly present or acting in that scene.
+- Use ONLY IDs that exist in the characters array.
+- Do not include a character just because they appeared in a previous scene.
+- If a character is not visible in the scene, do not include them.
+- If an animal drives the action in a scene, include that animal.
+
+ACTION RULES:
+- "actions" must be an ordered list of concrete, observable physical actions that MUST happen on screen.
+- Use short action statements such as:
+  "Vamika rides her bicycle"
+  "Alex brakes his bicycle"
+  "Both bicycles come to a complete stop"
+  "Vamika turns toward the snake"
+  "The snake moves across the road"
+- Do not use abstract statements such as "the story becomes exciting".
+- Put actions in chronological order.
+- Every important action from the user's story must appear in actions.
+
+START/END STATE RULES:
+- startState describes the visible physical state at the beginning of the scene.
+- endState describes the visible physical state the scene must reach before it ends.
+- endState must be visually achievable in a video frame.
+- The final scene MUST have a clear resolved endState that completes the story instead of ending mid-action.
+- If the story says someone stops, the endState must explicitly say that the person/object is stopped.
+- If the story says someone looks at or reacts to something, the endState must explicitly show that orientation/reaction.
+- Adjacent scenes should have compatible start/end states.
+
+CONTINUITY RULES:
+- Scene 2 must logically begin where Scene 1 ends.
+- Preserve character identity and physical state between scenes.
+- Preserve important environment/location continuity unless the story explicitly changes location.
+- Never jump backward in time.
+- Never introduce a new character without a story reason.
+
+FINAL CHECK:
+- Every distinct plot-important character appears exactly once in characters.
+- Every scene uses valid visibleCharacterIds.
+- Every scene has at least one meaningful action.
+- Every scene has a startState and endState.
+- The final scene resolves the story beat.
+- Narration matches the visual actions.
+- No extra characters or filler events were invented.
+
+General rules:
+- No markdown.
+- No code fences.
+- Return JSON only.
+`;
+
+const sleep = (milliseconds: number) =>
+  new Promise<void>((resolve) =>
+    setTimeout(resolve, milliseconds),
+  );
+
+const isRetryableOpenAIError = (
+  error: unknown,
+): boolean => {
+  const candidate = error as {
+    status?: unknown;
+    message?: unknown;
+  };
+
+  const status =
+    typeof candidate.status === "number"
+      ? candidate.status
+      : undefined;
+
+  if (
+    status === 408 ||
+    status === 429 ||
+    status === 500 ||
+    status === 502 ||
+    status === 503 ||
+    status === 504
+  ) {
+    return true;
+  }
+
+  const message =
+    typeof candidate.message === "string"
+      ? candidate.message.toLowerCase()
+      : error instanceof Error
+        ? error.message.toLowerCase()
+        : "";
+
+  return (
+    message.includes("rate limit") ||
+    message.includes("temporarily unavailable") ||
+    message.includes("service unavailable") ||
+    message.includes("overloaded") ||
+    message.includes("timeout")
+  );
+};
+
+const generateStoryAnalysisWithRetry = async (
+  client: OpenAI,
+  story: string,
+) => {
+  let lastError: unknown;
+
+  for (
+    let attempt = 1;
+    attempt <= MAX_RETRIES;
+    attempt += 1
+  ) {
+    try {
+      console.log(
+        `[OpenAIStoryAnalysisProvider] Story analysis attempt ${attempt}/${MAX_RETRIES}`,
+      );
+
+      return await client.chat.completions.create({
+        model: STORY_ANALYSIS_MODEL,
+        messages: [
+          {
+            role: "system",
+            content: systemInstruction,
+          },
+          {
+            role: "user",
+            content: story,
+          },
+        ],
+        response_format: {
+          type: "json_object",
+        },
+      });
+    } catch (error) {
+      lastError = error;
+
+      const retryable =
+        isRetryableOpenAIError(error);
+
+      console.warn(
+        `[OpenAIStoryAnalysisProvider] Story analysis attempt ${attempt} failed.`,
+      );
+
+      console.warn(
+        "[OpenAIStoryAnalysisProvider] Error:",
+        error,
+      );
+
+      if (
+        !retryable ||
+        attempt >= MAX_RETRIES
+      ) {
+        throw error;
+      }
+
+      const delay =
+        RETRY_DELAYS_MS[attempt - 1] ??
+        8_000;
+
+      console.warn(
+        `[OpenAIStoryAnalysisProvider] Retrying in ${delay / 1000}s...`,
+      );
+
+      await sleep(delay);
+    }
+  }
+
+  throw (
+    lastError ??
+    new Error("OpenAI story analysis failed.")
+  );
+};
+
+const isObject = (
+  value: unknown,
+): value is Record<string, unknown> =>
+  typeof value === "object" &&
+  value !== null &&
+  !Array.isArray(value);
+
+const toNonEmptyString = (
+  value: unknown,
+  fallback: string,
+): string =>
+  typeof value === "string" &&
+  value.trim()
+    ? value.trim()
+    : fallback;
+
+const toStringArray = (
+  value: unknown,
+): string[] =>
+  Array.isArray(value)
+    ? value
+        .filter(
+          (item): item is string =>
+            typeof item === "string" &&
+            item.trim().length > 0,
+        )
+        .map((item) => item.trim())
+    : [];
+
+const toDuration = (
+  value: unknown,
+): number => {
+  const parsed =
+    typeof value === "number"
+      ? value
+      : Number(value);
+
+  if (!Number.isFinite(parsed)) {
+    return 5;
+  }
+
+  return Math.min(
+    10,
+    Math.max(3, Math.round(parsed)),
+  );
+};
+
+export class OpenAIStoryAnalysisProvider
+  implements StoryAnalysisProvider
+{
+  async analyzeStory(
+    story: string,
+  ): Promise<StoryAnalysisResult> {
+    const apiKey =
+      process.env.OPENAI_API_KEY?.trim();
+
+    if (!apiKey) {
+      throw new Error(
+        "OPENAI_API_KEY is not configured.",
+      );
+    }
+
+    const cleanStory = story.trim();
+
+    if (!cleanStory) {
+      throw new Error("Story is required.");
+    }
+
+    const client = new OpenAI({ apiKey });
+
+    console.log(
+      "[OpenAIStoryAnalysisProvider] Analyzing story...",
+    );
+
+    const response =
+      await generateStoryAnalysisWithRetry(
+        client,
+        cleanStory,
+      );
+
+    const raw =
+      response.choices[0]?.message?.content?.trim();
+
+    if (!raw) {
+      throw new Error(
+        "OpenAI returned an empty story analysis.",
+      );
+    }
+
+    let parsed: unknown;
+
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      throw new Error(
+        "OpenAI returned invalid story analysis JSON.",
+      );
+    }
+
+    if (!isObject(parsed)) {
+      throw new Error(
+        "OpenAI returned an invalid story analysis object.",
+      );
+    }
+
+    const rawCharacters =
+      Array.isArray(parsed.characters)
+        ? parsed.characters
+        : [];
+
+    const baseCharacters =
+      rawCharacters
+        .filter(isObject)
+        .map((character, index) => ({
+          id: toNonEmptyString(
+            character.id,
+            `character-${index + 1}`,
+          ),
+          name: toNonEmptyString(
+            character.name,
+            `Character ${index + 1}`,
+          ),
+          role: toNonEmptyString(
+            character.role,
+            `Character ${index + 1}`,
+          ),
+          visualDescription:
+            toNonEmptyString(
+              character.visualDescription,
+              "A distinctive character with a consistent visual design.",
+            ),
+          imagePrompt:
+            toNonEmptyString(
+              character.imagePrompt,
+              toNonEmptyString(
+                character.visualDescription,
+                "A distinctive character with a consistent visual design.",
+              ),
+            ),
+        }));
+
+    if (baseCharacters.length === 0) {
+      throw new Error(
+        "OpenAI returned no characters.",
+      );
+    }
+
+    const validCharacterIds =
+      new Set(
+        baseCharacters.map(
+          (character) => character.id,
+        ),
+      );
+
+    const characters =
+      baseCharacters.map((character) => ({
+        id: character.id,
+        name: character.name,
+        role: character.role,
+        visualDescription:
+          character.visualDescription,
+        imagePrompt: character.imagePrompt,
+        imageUrl: undefined,
+      }));
+
+    const rawScenes =
+      Array.isArray(parsed.scenes)
+        ? parsed.scenes
+        : [];
+
+    const scenes =
+      rawScenes
+        .filter(isObject)
+        .map((scene, index) => {
+          const description =
+            toNonEmptyString(
+              scene.description,
+              "A cinematic scene that advances the story.",
+            );
+
+          const visibleCharacterIds =
+            toStringArray(
+              scene.visibleCharacterIds,
+            ).filter((id) =>
+              validCharacterIds.has(id),
+            );
+
+          const actions =
+            toStringArray(
+              scene.actions,
+            );
+
+          return {
+            sceneNumber: index + 1,
+            title: toNonEmptyString(
+              scene.title,
+              `Scene ${index + 1}`,
+            ),
+            description,
+            narration: toNonEmptyString(
+              scene.narration,
+              "",
+            ),
+            durationSeconds:
+              toDuration(
+                scene.durationSeconds,
+              ),
+            visibleCharacterIds,
+            actions,
+            startState:
+              toNonEmptyString(
+                scene.startState,
+                description,
+              ),
+            endState:
+              toNonEmptyString(
+                scene.endState,
+                description,
+              ),
+          };
+        });
+
+    if (scenes.length === 0) {
+      throw new Error(
+        "OpenAI returned no scenes.",
+      );
+    }
+
+    console.log(
+      "[OpenAIStoryAnalysisProvider] Story analysis completed.",
+    );
+
+    console.log(
+      `[OpenAIStoryAnalysisProvider] Characters: ${characters.length}`,
+    );
+
+    console.log(
+      `[OpenAIStoryAnalysisProvider] Scenes: ${scenes.length}`,
+    );
+
+    console.log(
+      "[OpenAIStoryAnalysisProvider] Scene manifest:",
+      scenes.map((scene) => ({
+        sceneNumber:
+          scene.sceneNumber,
+        visibleCharacterIds:
+          scene.visibleCharacterIds,
+        actions: scene.actions,
+        startState:
+          scene.startState,
+        endState:
+          scene.endState,
+      })),
+    );
+
+    return {
+      title: toNonEmptyString(
+        parsed.title,
+        "Untitled Story",
+      ),
+      summary: toNonEmptyString(
+        parsed.summary,
+        cleanStory,
+      ),
+      characters,
+      scenes,
+    };
+  }
+}
+
+// Backward-compatible export so existing imports do not break.
+export const GeminiStoryAnalysisProvider =
+  OpenAIStoryAnalysisProvider;

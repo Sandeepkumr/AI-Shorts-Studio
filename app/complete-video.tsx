@@ -8,13 +8,18 @@ import {
     TouchableOpacity,
     Image,
     Animated,
-    Share,
     Alert,
     useWindowDimensions,
 } from 'react-native';
+import * as MediaLibrary from 'expo-media-library';
+import * as Sharing from 'expo-sharing';
+import { File, Paths } from 'expo-file-system';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Feather as Icon, FontAwesome5 } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useEvent } from 'expo';
+import { useVideoPlayer, VideoView } from 'expo-video';
+import { projectStore } from '../src/services/projectStore';
 
 /* ============================================================
    THEME
@@ -44,37 +49,223 @@ const COLORS = {
 };
 
 /* ============================================================
-   MOCK VIDEO DATA
+   DYNAMIC VIDEO DATA
 ============================================================ */
 
-const videoData = {
-    title: 'Switzerland Travel Story',
+const API_BASE_URL =
+    'http://192.168.31.189:4000';
 
-    description:
-        'A breathtaking journey through the beautiful landscapes of Switzerland.',
-
-    thumbnail: require('../assets/switzerland_story.png'),
-
-    duration: '60 sec',
-    aspectRatio: '9:16',
-    style: 'Cinematic',
-    resolution: '1080p',
-    createdOn: 'May 12, 2025',
+type CompleteVideoParams = {
+    videoUrl?: string;
+    story?: string;
+    title?: string;
+    duration?: string;
+    ratio?: string;
+    style?: string;
+    language?: string;
+    voice?: string;
+    resolution?: string;
+    createdAt?: string;
+    projectType?: string;
 };
 
-/*
- * Replace this later with the actual generated video URL
- * returned from your backend.
- */
-const VIDEO_URL = '';
+const resolveVideoUrl = (
+    value?: string,
+): string | undefined => {
+    if (!value?.trim()) {
+        return undefined;
+    }
+
+    const normalized =
+        value.trim();
+
+    if (
+        normalized.startsWith(
+            'http://',
+        ) ||
+        normalized.startsWith(
+            'https://',
+        )
+    ) {
+        return normalized;
+    }
+
+    return `${API_BASE_URL}${
+        normalized.startsWith('/')
+            ? ''
+            : '/'
+    }${normalized}`;
+};
+
+const formatStyle = (
+    value?: string,
+): string => {
+    switch (
+        value?.trim()
+    ) {
+        case '3d':
+            return '3D Animation';
+
+        case 'cinematic':
+            return 'Cinematic';
+
+        case 'realistic':
+            return 'Realistic';
+
+        case 'anime':
+            return 'Anime';
+
+        case 'cartoon':
+            return 'Cartoon';
+
+        default:
+            return (
+                value?.trim() ||
+                '3D Animation'
+            );
+    }
+};
+
+const formatVoice = (
+    value?: string,
+): string => {
+    switch (
+        value?.trim()
+    ) {
+        case 'female':
+            return 'Female Voice';
+
+        case 'male':
+            return 'Male Voice';
+
+        case 'none':
+            return 'No Voice';
+
+        case 'auto':
+            return 'AI Auto';
+
+        default:
+            return (
+                value?.trim() ||
+                'AI Auto'
+            );
+    }
+};
+
+const getTodayLabel =
+    (): string =>
+        new Intl.DateTimeFormat(
+            'en-US',
+            {
+                month: 'short',
+                day: 'numeric',
+                year: 'numeric',
+            },
+        ).format(
+            new Date(),
+        );
 
 /* ============================================================
    COMPONENT
 ============================================================ */
 
+const downloadVideoToLocalFile = async (
+    remoteUrl: string,
+): Promise<string> => {
+    const fileName =
+        `shivora-video-${Date.now()}.mp4`;
+
+    const destination =
+        new File(
+            Paths.cache,
+            fileName,
+        );
+
+    const downloaded =
+        await File.downloadFileAsync(
+            remoteUrl,
+            destination,
+            {
+                idempotent: true,
+            },
+        );
+
+    return downloaded.uri;
+};
+
 const VideoCompleteScreen = () => {
     const router = useRouter();
-    const { width, height } = useWindowDimensions();
+
+    const params =
+        useLocalSearchParams<CompleteVideoParams>();
+
+    const { width, height } =
+        useWindowDimensions();
+
+    const videoUrl =
+        resolveVideoUrl(
+            params.videoUrl,
+        );
+
+    const displayTitle =
+        params.title?.trim() ||
+        'Your Video';
+
+    const displayDescription =
+        params.story?.trim() ||
+        'Your generated video is ready to watch and share.';
+
+    const displayDuration =
+        params.duration?.trim() ||
+        '30';
+
+    const displayRatio =
+        params.ratio?.trim() ||
+        '9:16';
+
+    const displayStyle =
+        formatStyle(
+            params.style,
+        );
+
+    const displayLanguage =
+        params.language?.trim() ||
+        'English (US)';
+
+    const displayVoice =
+        formatVoice(
+            params.voice,
+        );
+
+    const displayResolution =
+        params.resolution?.trim() ||
+        '480p';
+
+    const displayCreatedOn =
+        params.createdAt?.trim() ||
+        getTodayLabel();
+
+    const player =
+        useVideoPlayer(
+            videoUrl ?? null,
+            (videoPlayer) => {
+                videoPlayer.loop = false;
+            },
+        );
+
+    const {
+        isPlaying,
+    } = useEvent(
+        player,
+        'playingChange',
+        {
+            isPlaying:
+                player.playing,
+        },
+    );
+
+    const [isSavingProject, setIsSavingProject] =
+        React.useState(false);
 
     /*
      * Base design is optimized for approximately
@@ -117,75 +308,283 @@ const VideoCompleteScreen = () => {
        ACTIONS
     ========================================================= */
 
-    const handlePlayVideo = () => {
-        if (!VIDEO_URL) {
-            Alert.alert(
-                'Video Preview',
-                'The generated video URL will be connected here after video generation is integrated.'
-            );
-            return;
-        }
+    const handlePlayVideo =
+        () => {
+            if (!videoUrl) {
+                Alert.alert(
+                    'Video Preview',
+                    'The generated video URL is unavailable.',
+                );
 
-        // Connect your video player here.
-    };
+                return;
+            }
 
-    const handleDownload = () => {
-        if (!VIDEO_URL) {
-            Alert.alert(
-                'Download Video',
-                'The generated video URL will be connected here after video generation is integrated.'
-            );
-            return;
-        }
+            try {
+                if (player.playing) {
+                    player.pause();
+                } else {
+                    player.play();
+                }
+            } catch (error) {
+                console.error(
+                    '[VIDEO READY] Play error:',
+                    error,
+                );
 
-        // Connect your actual download implementation here.
-    };
+                Alert.alert(
+                    'Video Preview',
+                    'Unable to play the generated video.',
+                );
+            }
+        };
 
-    const handleShare = async () => {
-        try {
-            if (!VIDEO_URL) {
+    const handleDownload =
+        async () => {
+            if (
+                isSavingProject ||
+                !videoUrl
+            ) {
+                if (!videoUrl) {
+                    Alert.alert(
+                        'Download Video',
+                        'The generated video URL is unavailable.',
+                    );
+                }
+
+                return;
+            }
+
+            setIsSavingProject(true);
+
+            try {
+                console.log(
+                    '[VIDEO READY] Downloading video to device...',
+                );
+
+                const localUri =
+                    await downloadVideoToLocalFile(
+                        videoUrl,
+                    );
+
+                console.log(
+                    '[VIDEO READY] Local video:',
+                    localUri,
+                );
+
+                /*
+                 * Save the actual MP4 to the user's
+                 * Photos / Camera Roll.
+                 */
+                const permission =
+                    await MediaLibrary.requestPermissionsAsync(
+                        true,
+                    );
+
+                if (!permission.granted) {
+                    Alert.alert(
+                        'Permission Required',
+                        'Please allow Shivora to access your Photos so the video can be saved to your Camera Roll.',
+                    );
+
+                    return;
+                }
+
+                await MediaLibrary.saveToLibraryAsync(
+                    localUri,
+                );
+
+                console.log(
+                    '[VIDEO READY] Video saved to Camera Roll.',
+                );
+
+                /*
+                 * Also persist the project in Shivora.
+                 */
+                await projectStore.saveProject({
+                    id:
+                        `video-${Date.now()}`,
+                    title:
+                        displayTitle,
+                    type:
+                        params.projectType ===
+                        'Image to Video'
+                            ? 'Image to Video'
+                            : 'Text to Video',
+                    duration:
+                        displayDuration
+                            ? `${displayDuration} sec`
+                            : '0 sec',
+                    date:
+                        new Date().toISOString(),
+                    status:
+                        'Completed',
+                    favorite:
+                        false,
+                    videoUrl,
+                    ratio:
+                        displayRatio,
+                    style:
+                        params.style?.trim() ||
+                        '3d',
+                    language:
+                        displayLanguage,
+                    voice:
+                        params.voice?.trim() ||
+                        'auto',
+                    resolution:
+                        displayResolution,
+                });
+
+                console.log(
+                    '[VIDEO READY] Project saved to My Projects.',
+                );
+
+                router.push({
+                    pathname:
+                        '/save-video',
+                    params: {
+                        videoUrl,
+                        localUri,
+                        title:
+                            displayTitle,
+                    },
+                } as any);
+            } catch (error) {
+                console.error(
+                    '[VIDEO READY] Download/save error:',
+                    error,
+                );
+
+                Alert.alert(
+                    'Download Failed',
+                    error instanceof Error
+                        ? error.message
+                        : 'Unable to save the video. Please try again.',
+                );
+            } finally {
+                setIsSavingProject(
+                    false,
+                );
+            }
+        };
+
+
+    const handleShare =
+        async () => {
+            if (!videoUrl) {
                 Alert.alert(
                     'Share Video',
-                    'The generated video URL will be connected here after video generation is integrated.'
+                    'The generated video URL is unavailable.',
                 );
+
                 return;
             }
 
-            await Share.share({
-                message: `Check out my video: ${videoData.title}`,
-                url: VIDEO_URL,
-            });
-        } catch (error) {
-            console.log('Share error:', error);
-        }
-    };
+            try {
+                const isAvailable =
+                    await Sharing.isAvailableAsync();
 
-    const handleSocialShare = async (platform: string) => {
-        try {
-            if (!VIDEO_URL) {
+                if (!isAvailable) {
+                    Alert.alert(
+                        'Share Video',
+                        'Video sharing is not available on this device.',
+                    );
+
+                    return;
+                }
+
+                const localUri =
+                    await downloadVideoToLocalFile(
+                        videoUrl,
+                    );
+
+                await Sharing.shareAsync(
+                    localUri,
+                    {
+                        mimeType:
+                            'video/mp4',
+                        dialogTitle:
+                            `Share ${displayTitle}`,
+                        UTI:
+                            'public.movie',
+                    },
+                );
+            } catch (error) {
+                console.error(
+                    '[VIDEO READY] Share error:',
+                    error,
+                );
+
+                Alert.alert(
+                    'Share Video',
+                    'Unable to prepare the video for sharing.',
+                );
+            }
+        };
+
+
+    const handleSocialShare =
+        async (
+            platform: string,
+        ) => {
+            if (!videoUrl) {
                 Alert.alert(
                     `${platform} Share`,
-                    'The generated video URL will be connected here after video generation is integrated.'
+                    'The generated video URL is unavailable.',
                 );
+
                 return;
             }
 
-            await Share.share({
-                message: `Check out my video: ${videoData.title}`,
-                url: VIDEO_URL,
-            });
-        } catch (error) {
-            console.log(`${platform} share error:`, error);
-        }
-    };
+            try {
+                const isAvailable =
+                    await Sharing.isAvailableAsync();
 
-    const handleCreateAnother = () => {
-        /*
-         * Change this route only if your actual create screen
-         * uses another Expo Router path.
-         */
-        router.push('/create-video');
-    };
+                if (!isAvailable) {
+                    Alert.alert(
+                        `${platform} Share`,
+                        'Video sharing is not available on this device.',
+                    );
+
+                    return;
+                }
+
+                const localUri =
+                    await downloadVideoToLocalFile(
+                        videoUrl,
+                    );
+
+                await Sharing.shareAsync(
+                    localUri,
+                    {
+                        mimeType:
+                            'video/mp4',
+                        dialogTitle:
+                            `Share ${displayTitle}`,
+                        UTI:
+                            'public.movie',
+                    },
+                );
+            } catch (error) {
+                console.error(
+                    `[VIDEO READY] ${platform} share error:`,
+                    error,
+                );
+
+                Alert.alert(
+                    `${platform} Share`,
+                    'Unable to prepare the video for sharing.',
+                );
+            }
+        };
+
+
+    const handleCreateAnother =
+        () => {
+            router.replace(
+                '/home',
+            );
+        };
 
     /* =========================================================
        DYNAMIC SIZES
@@ -226,8 +625,8 @@ const VideoCompleteScreen = () => {
         detailValue: 11.5 * scale,
 
         actionHeight: 48 * scale,
-        actionText: 15 * scale,
-        actionIcon: 19 * scale,
+        actionText: 15.5 * scale,
+        actionIcon: 20 * scale,
 
         socialCircle: 43 * scale,
         socialIcon: 21 * scale,
@@ -422,11 +821,24 @@ const VideoCompleteScreen = () => {
                                 activeOpacity={0.9}
                                 onPress={handlePlayVideo}
                             >
-                                <Image
-                                    source={videoData.thumbnail}
-                                    style={styles.videoThumbnail}
-                                    resizeMode="cover"
-                                />
+                                {videoUrl ? (
+                                    <VideoView
+                                        player={player}
+                                        style={
+                                            styles.videoThumbnail
+                                        }
+                                        contentFit="cover"
+                                        nativeControls={false}
+                                    />
+                                ) : (
+                                    <Image
+                                        source={require('../assets/text-video-hero.png')}
+                                        style={
+                                            styles.videoThumbnail
+                                        }
+                                        resizeMode="cover"
+                                    />
+                                )}
 
                                 {/* Bottom gradient */}
                                 <LinearGradient
@@ -456,11 +868,18 @@ const VideoCompleteScreen = () => {
                                     ]}
                                 >
                                     <Icon
-                                        name="play"
+                                        name={
+                                            isPlaying
+                                                ? 'pause'
+                                                : 'play'
+                                        }
                                         size={sizes.playIcon}
                                         color={COLORS.white}
                                         style={{
-                                            marginLeft: 3 * scale,
+                                            marginLeft:
+                                                isPlaying
+                                                    ? 0
+                                                    : 3 * scale,
                                         }}
                                     />
                                 </View>
@@ -486,7 +905,7 @@ const VideoCompleteScreen = () => {
                                         ]}
                                         numberOfLines={1}
                                     >
-                                        {videoData.title}
+                                        {displayTitle}
                                     </Text>
 
                                     <View
@@ -524,7 +943,7 @@ const VideoCompleteScreen = () => {
                                                     },
                                                 ]}
                                             >
-                                                {videoData.duration}
+                                                {displayDuration} sec
                                             </Text>
                                         </View>
 
@@ -555,7 +974,7 @@ const VideoCompleteScreen = () => {
                                                     },
                                                 ]}
                                             >
-                                                {videoData.aspectRatio}
+                                                {displayRatio}
                                             </Text>
                                         </View>
 
@@ -586,7 +1005,7 @@ const VideoCompleteScreen = () => {
                                                     },
                                                 ]}
                                             >
-                                                {videoData.style}
+                                                {displayStyle}
                                             </Text>
                                         </View>
 
@@ -613,7 +1032,7 @@ const VideoCompleteScreen = () => {
                                                     },
                                                 ]}
                                             >
-                                                {videoData.resolution}
+                                                {displayResolution}
                                             </Text>
                                         </View>
                                     </View>
@@ -630,7 +1049,7 @@ const VideoCompleteScreen = () => {
                                 styles.detailsCard,
                                 {
                                     height: sizes.detailsHeight,
-                                    borderRadius: 15 * scale,
+                                    borderRadius: 26,
                                     marginTop: 10 * scale,
                                     marginBottom: 10 * scale,
                                 },
@@ -682,7 +1101,7 @@ const VideoCompleteScreen = () => {
                                         },
                                     ]}
                                 >
-                                    1080p
+                                    {displayResolution}
                                 </Text>
                             </View>
 
@@ -734,7 +1153,7 @@ const VideoCompleteScreen = () => {
                                         },
                                     ]}
                                 >
-                                    60 sec
+                                    {displayDuration} sec
                                 </Text>
                             </View>
 
@@ -786,7 +1205,7 @@ const VideoCompleteScreen = () => {
                                         },
                                     ]}
                                 >
-                                    9:16
+                                    {displayRatio}
                                 </Text>
                             </View>
 
@@ -839,8 +1258,106 @@ const VideoCompleteScreen = () => {
                                     ]}
                                     numberOfLines={1}
                                 >
-                                    May 12, 2025
+                                    {displayCreatedOn}
                                 </Text>
+                            </View>
+                        </View>
+
+                        <View
+                            style={[
+                                styles.languageVoiceCard,
+                                {
+                                    borderRadius:
+                                        15 * scale,
+                                    marginBottom:
+                                        10 * scale,
+                                    paddingHorizontal:
+                                        12 * scale,
+                                    paddingVertical:
+                                        9 * scale,
+                                },
+                            ]}
+                        >
+                            <View
+                                style={styles.languageVoiceItem}
+                            >
+                                <Icon
+                                    name="globe"
+                                    size={15 * scale}
+                                    color={COLORS.primary}
+                                />
+
+                                <View
+                                    style={
+                                        styles.languageVoiceCopy
+                                    }
+                                >
+                                    <Text
+                                        style={[
+                                            styles.languageVoiceLabel,
+                                            {
+                                                fontSize:
+                                                    8.5 * scale,
+                                            },
+                                        ]}
+                                    >
+                                        Language
+                                    </Text>
+
+                                    <Text
+                                        style={[
+                                            styles.languageVoiceValue,
+                                            {
+                                                fontSize:
+                                                    10 * scale,
+                                            },
+                                        ]}
+                                        numberOfLines={1}
+                                    >
+                                        {displayLanguage}
+                                    </Text>
+                                </View>
+                            </View>
+
+                            <View
+                                style={styles.languageVoiceItem}
+                            >
+                                <Icon
+                                    name="volume-2"
+                                    size={15 * scale}
+                                    color={COLORS.blue}
+                                />
+
+                                <View
+                                    style={
+                                        styles.languageVoiceCopy
+                                    }
+                                >
+                                    <Text
+                                        style={[
+                                            styles.languageVoiceLabel,
+                                            {
+                                                fontSize:
+                                                    8.5 * scale,
+                                            },
+                                        ]}
+                                    >
+                                        Voice
+                                    </Text>
+
+                                    <Text
+                                        style={[
+                                            styles.languageVoiceValue,
+                                            {
+                                                fontSize:
+                                                    10 * scale,
+                                            },
+                                        ]}
+                                        numberOfLines={1}
+                                    >
+                                        {displayVoice}
+                                    </Text>
+                                </View>
                             </View>
                         </View>
 
@@ -852,16 +1369,17 @@ const VideoCompleteScreen = () => {
                             style={[
                                 styles.downloadButton,
                                 {
-                                    height: sizes.actionHeight,
+                                    height: 52,
                                     borderRadius:
-                                        15 * scale,
+                                        26,
                                     marginBottom:
-                                        7 * scale,
+                                        8 * scale,
                                     overflow: 'hidden',
                                 },
                             ]}
                             activeOpacity={0.85}
-                            onPress={() => router.push('/save-video')}
+                            onPress={() => { void handleDownload(); }}
+                            disabled={isSavingProject}
                         >
                             <LinearGradient
                                 colors={['#00CFFF', '#2C75FF', '#8C2EFF']}
@@ -890,7 +1408,9 @@ const VideoCompleteScreen = () => {
                                         },
                                     ]}
                                 >
-                                    Download Video
+                                    {isSavingProject
+                                        ? 'Saving to Projects...'
+                                        : 'Download Video'}
                                 </Text>
                             </LinearGradient>
                         </TouchableOpacity>
@@ -1445,29 +1965,67 @@ const styles = StyleSheet.create({
         backgroundColor: COLORS.borderLight,
     },
 
+    /* Language / Voice */
+
+    languageVoiceCard: {
+        width: '100%',
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        backgroundColor: 'rgba(7,23,37,0.82)',
+        borderWidth: 1.2,
+        borderColor: COLORS.border,
+    },
+
+    languageVoiceItem: {
+        flex: 1,
+        flexDirection: 'row',
+        alignItems: 'center',
+        minWidth: 0,
+        paddingHorizontal: 4,
+    },
+
+    languageVoiceCopy: {
+        flex: 1,
+        minWidth: 0,
+        marginLeft: 7,
+    },
+
+    languageVoiceLabel: {
+        color: COLORS.textSecondary,
+        marginBottom: 1,
+    },
+
+    languageVoiceValue: {
+        color: COLORS.white,
+        fontWeight: '700',
+    },
+
     /* Buttons */
 
     downloadButton: {
         width: '100%',
+        height: 52,
+        borderRadius: 26,
+        overflow: 'hidden',
         backgroundColor: 'transparent',
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'center',
 
-        shadowColor: COLORS.primaryBright,
+        shadowColor: COLORS.primary,
         shadowOffset: {
             width: 0,
-            height: 3,
+            height: 7,
         },
-        shadowOpacity: 0.16,
-        shadowRadius: 7,
-        elevation: 5,
+        shadowOpacity: 0.18,
+        shadowRadius: 12,
+        elevation: 7,
     },
 
     downloadButtonText: {
-        color: '#00120F',
-        fontWeight: '800',
-        marginLeft: 9,
+        color: '#FFFFFF',
+        fontSize: 15,
+        lineHeight: 20,
+        fontWeight: '700',
+        marginLeft: 8,
     },
 
     shareButton: {

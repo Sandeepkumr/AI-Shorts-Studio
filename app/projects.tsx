@@ -1,5 +1,6 @@
-import React, { useMemo, useState } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import {
+  ActivityIndicator,
   Alert,
   Image,
   Modal,
@@ -15,8 +16,13 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
+import { VideoView, useVideoPlayer } from "expo-video";
+import * as VideoThumbnails from "expo-video-thumbnails";
+import * as MediaLibrary from "expo-media-library";
+import * as FileSystem from "expo-file-system/legacy";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useRouter } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
+import { projectStore } from "../src/services/projectStore";
 
 /*
  * ============================================================
@@ -102,60 +108,14 @@ type Project = {
   status: ProjectStatus;
   favorite: boolean;
   image: any;
+  thumbnailUrl?: string;
+  videoUrl?: string;
+  ratio?: string;
+  style?: string;
+  language?: string;
+  voice?: string;
+  resolution?: string;
 };
-
-const INITIAL_PROJECTS: Project[] = [
-  {
-    id: "p1",
-    title: "Alex's Burger Adventure",
-    type: "Text to Video",
-    duration: "45 sec",
-    date: "Today, 10:30 AM",
-    status: "Completed",
-    favorite: true,
-    image: ASSETS.alexBurger,
-  },
-  {
-    id: "p2",
-    title: "Vamika's Magic Feather",
-    type: "Text to Video",
-    duration: "1:20",
-    date: "Yesterday, 04:15 PM",
-    status: "Completed",
-    favorite: true,
-    image: ASSETS.vamikaFeather,
-  },
-  {
-    id: "p3",
-    title: "Nature Cinematic View",
-    type: "Image to Video",
-    duration: "30 sec",
-    date: "18 Aug 2025, 08:40 PM",
-    status: "Processing",
-    favorite: false,
-    image: ASSETS.natureCinematic,
-  },
-  {
-    id: "p4",
-    title: "Aria in Space Mission",
-    type: "Text to Video",
-    duration: "52 sec",
-    date: "17 Aug 2025, 11:20 AM",
-    status: "Draft",
-    favorite: false,
-    image: ASSETS.ariaSpace,
-  },
-  {
-    id: "p5",
-    title: "Elder Leo's Wisdom",
-    type: "Image to Video",
-    duration: "1:05",
-    date: "16 Aug 2025, 06:10 PM",
-    status: "Completed",
-    favorite: false,
-    image: ASSETS.elderLeo,
-  },
-];
 
 type Filter = "All" | ProjectType | "Favorites";
 
@@ -163,6 +123,304 @@ type MoreMenuState = {
   visible: boolean;
   project: Project | null;
 };
+
+
+const API_BASE_URL =
+  process.env.EXPO_PUBLIC_API_BASE_URL ||
+  "http://192.168.31.189:4000";
+
+const resolveProjectUrl = (
+  value?: string,
+): string => {
+  const trimmed = value?.trim();
+
+  if (!trimmed) {
+    return "";
+  }
+
+  if (
+    trimmed.startsWith("http://") ||
+    trimmed.startsWith("https://")
+  ) {
+    return trimmed;
+  }
+
+  return `${API_BASE_URL.replace(/\/+$/, "")}/${trimmed.replace(/^\/+/, "")}`;
+};
+
+const buildProjectThumbnail = async (
+  videoUrl?: string,
+): Promise<string | undefined> => {
+  const resolvedVideoUrl =
+    resolveProjectUrl(videoUrl);
+
+  if (!resolvedVideoUrl) {
+    return undefined;
+  }
+
+  try {
+    const result =
+      await VideoThumbnails.getThumbnailAsync(
+        resolvedVideoUrl,
+        {
+          time: 0,
+        },
+      );
+
+    return result.uri;
+  } catch (error) {
+    console.warn(
+      "[PROJECTS] Failed to generate video thumbnail:",
+      error,
+    );
+
+    return undefined;
+  }
+};
+
+type FullScreenVideoModalProps = {
+  project: Project | null;
+  onClose: () => void;
+};
+
+function FullScreenVideoModal({
+  project,
+  onClose,
+}: FullScreenVideoModalProps) {
+  const videoUrl =
+    resolveProjectUrl(
+      project?.videoUrl,
+    );
+
+  const player =
+    useVideoPlayer(
+      videoUrl || null,
+      (videoPlayer) => {
+        videoPlayer.loop = false;
+
+        if (videoUrl) {
+          videoPlayer.play();
+        }
+      },
+    );
+
+  const [isSaving, setIsSaving] =
+    useState(false);
+
+  const saveToGallery =
+    useCallback(async () => {
+      if (!videoUrl) {
+        Alert.alert(
+          "Video unavailable",
+          "This project does not have a playable video file.",
+        );
+        return;
+      }
+
+      try {
+        setIsSaving(true);
+
+        const permission =
+          await MediaLibrary.requestPermissionsAsync();
+
+        if (
+          !permission.granted
+        ) {
+          Alert.alert(
+            "Permission required",
+            "Please allow Photos/Gallery access to save the video.",
+          );
+          return;
+        }
+
+        const fileName =
+          `${project?.id || "shivora-video"}-${Date.now()}.mp4`;
+
+        const targetUri =
+          `${FileSystem.cacheDirectory}${fileName}`;
+
+        const downloadResult =
+          await FileSystem.downloadAsync(
+            videoUrl,
+            targetUri,
+          );
+
+        if (
+          downloadResult.status !== 200
+        ) {
+          throw new Error(
+            `Video download failed with status ${downloadResult.status}.`,
+          );
+        }
+
+        await MediaLibrary.createAssetAsync(
+          downloadResult.uri,
+        );
+
+        Alert.alert(
+          "Saved",
+          "Video saved to your gallery.",
+        );
+      } catch (error) {
+        console.error(
+          "[PROJECTS] Failed to save video to gallery:",
+          error,
+        );
+
+        const errorMessage =
+          error instanceof Error
+            ? error.message
+            : String(error);
+
+        console.error(
+          "[PROJECTS] Save error details:",
+          errorMessage,
+        );
+
+        Alert.alert(
+          "Save failed",
+          `We couldn't save this video to your gallery.\n\n${errorMessage}`,
+        );
+      } finally {
+        setIsSaving(false);
+      }
+    }, [
+      project?.id,
+      videoUrl,
+    ]);
+
+  if (!project) {
+    return null;
+  }
+
+  return (
+    <Modal
+      visible={project !== null}
+      animationType="slide"
+      presentationStyle="fullScreen"
+      statusBarTranslucent
+      onRequestClose={onClose}
+    >
+      <View
+        style={
+          styles.videoModalRoot
+        }
+      >
+        <StatusBar
+          barStyle="light-content"
+          backgroundColor="#000000"
+        />
+
+        <View
+          style={
+            styles.videoModalHeader
+          }
+        >
+          <Pressable
+            onPress={onClose}
+            hitSlop={10}
+            style={
+              styles.videoModalClose
+            }
+            accessibilityRole="button"
+            accessibilityLabel="Close video player"
+          >
+            <Ionicons
+              name="chevron-back"
+              size={30}
+              color="#FFFFFF"
+            />
+          </Pressable>
+
+          <Text
+            style={
+              styles.videoModalTitle
+            }
+            numberOfLines={1}
+          >
+            {project.title}
+          </Text>
+
+          <Pressable
+            onPress={saveToGallery}
+            hitSlop={10}
+            style={
+              styles.videoModalSave
+            }
+            accessibilityRole="button"
+            accessibilityLabel="Save video to gallery"
+          >
+            {isSaving ? (
+              <ActivityIndicator
+                size="small"
+                color="#FFFFFF"
+              />
+            ) : (
+              <Ionicons
+                name="download-outline"
+                size={24}
+                color="#FFFFFF"
+              />
+            )}
+          </Pressable>
+        </View>
+
+        <View
+          style={
+            styles.videoModalPlayerWrap
+          }
+        >
+          {videoUrl ? (
+            <VideoView
+              player={player}
+              style={
+                styles.videoModalPlayer
+              }
+              nativeControls
+              contentFit="contain"
+              allowsFullscreen
+              allowsPictureInPicture
+            />
+          ) : (
+            <View
+              style={
+                styles.videoModalEmpty
+              }
+            >
+              <Ionicons
+                name="videocam-off-outline"
+                size={48}
+                color={COLORS.secondary}
+              />
+              <Text
+                style={
+                  styles.videoModalEmptyText
+                }
+              >
+                Video unavailable
+              </Text>
+            </View>
+          )}
+        </View>
+
+        <View
+          style={
+            styles.videoModalFooter
+          }
+        >
+          <Text
+            style={
+              styles.videoModalFooterText
+            }
+          >
+            {project.type} •{" "}
+            {project.duration}
+          </Text>
+        </View>
+      </View>
+    </Modal>
+  );
+}
 
 export default function ProjectsScreen() {
   const router = useRouter();
@@ -173,7 +431,96 @@ export default function ProjectsScreen() {
   const horizontalPadding = isSmall ? 18 : isLarge ? 27 : 22;
 
   const [projects, setProjects] =
-    useState<Project[]>(INITIAL_PROJECTS);
+    useState<Project[]>([]);
+
+  useFocusEffect(
+    useCallback(() => {
+      let active = true;
+
+      const loadSavedProjects = async () => {
+        try {
+          const saved =
+            await projectStore.getProjects();
+
+          if (!active) {
+            return;
+          }
+
+          const savedProjects: Project[] =
+            await Promise.all(
+              saved.map(
+                async (project) => {
+                  const thumbnailUrl =
+                    await buildProjectThumbnail(
+                      project.videoUrl,
+                    );
+
+                  return {
+                    id: project.id,
+                    title: project.title,
+                    type: project.type,
+                    duration: project.duration,
+                    date: project.date,
+                    status: "Completed",
+                    favorite: Boolean(
+                      project.favorite,
+                    ),
+                    image:
+                      thumbnailUrl
+                        ? {
+                            uri: thumbnailUrl,
+                          }
+                        : ASSETS.vamikaFeather,
+                    thumbnailUrl,
+                    videoUrl:
+                      project.videoUrl,
+                    ratio:
+                      project.ratio,
+                    style:
+                      project.style,
+                    language:
+                      project.language,
+                    voice:
+                      project.voice,
+                    resolution:
+                      project.resolution,
+                  };
+                },
+              ),
+            );
+
+          const savedIds =
+            new Set(
+              savedProjects.map(
+                (project) =>
+                  project.id,
+              ),
+            );
+
+          setProjects((current) => [
+            ...savedProjects,
+            ...current.filter(
+              (project) =>
+                !savedIds.has(
+                  project.id,
+                ),
+            ),
+          ]);
+        } catch (error) {
+          console.error(
+            "[PROJECTS] Failed to load saved projects:",
+            error,
+          );
+        }
+      };
+
+      void loadSavedProjects();
+
+      return () => {
+        active = false;
+      };
+    }, []),
+  );
   const [searchQuery, setSearchQuery] = useState("");
   const [activeFilter, setActiveFilter] =
     useState<Filter>("All");
@@ -183,8 +530,9 @@ export default function ProjectsScreen() {
   });
   const [detailsProject, setDetailsProject] =
     useState<Project | null>(null);
-  const [showCreateVideoModal, setShowCreateVideoModal] =
-    useState(false);
+
+  const [playingProject, setPlayingProject] =
+    useState<Project | null>(null);
 
   const filteredProjects = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
@@ -224,31 +572,62 @@ export default function ProjectsScreen() {
   };
 
   const handleCreateNewVideo = () => {
-    setShowCreateVideoModal(true);
+    router.push("/create-video-screen-t2v");
   };
 
-  const handleOpenTextToVideo = () => {
-    setShowCreateVideoModal(false);
-    router.push("/create-video-screen-t2v" as any);
-  };
-
-  const handleOpenImageToVideo = () => {
-    setShowCreateVideoModal(false);
-    router.push("/add-story-image-to-video" as any);
-  };
-
-  const toggleFavorite = (id: string) => {
+  const toggleFavorite = async (
+    id: string,
+  ) => {
     setProjects((current) =>
       current.map((project) =>
         project.id === id
-          ? { ...project, favorite: !project.favorite }
-          : project
-      )
+          ? {
+              ...project,
+              favorite:
+                !project.favorite,
+            }
+          : project,
+      ),
     );
+
+    const project =
+      projects.find(
+        (item) =>
+          item.id === id,
+      );
+
+    if (project?.videoUrl) {
+      try {
+        await projectStore.toggleFavorite(
+          id,
+        );
+      } catch (error) {
+        console.error(
+          "[PROJECTS] Failed to persist favorite:",
+          error,
+        );
+      }
+    }
   };
 
-  const openProject = (project: Project) => {
-    setMenu({ visible: false, project: null });
+
+  const openProject = (
+    project: Project,
+  ) => {
+    setMenu({
+      visible: false,
+      project: null,
+    });
+
+    if (project.videoUrl) {
+      setDetailsProject(null);
+      setMenu({
+        visible: false,
+        project: null,
+      });
+      setPlayingProject(project);
+      return;
+    }
 
     if (project.status === "Draft") {
       Alert.alert(
@@ -302,10 +681,28 @@ export default function ProjectsScreen() {
         {
           text: "Delete",
           style: "destructive",
-          onPress: () =>
+          onPress: async () => {
             setProjects((current) =>
-              current.filter((item) => item.id !== project.id)
-            ),
+              current.filter(
+                (item) =>
+                  item.id !==
+                  project.id,
+              ),
+            );
+
+            if (project.videoUrl) {
+              try {
+                await projectStore.deleteProject(
+                  project.id,
+                );
+              } catch (error) {
+                console.error(
+                  "[PROJECTS] Failed to delete saved project:",
+                  error,
+                );
+              }
+            }
+          },
         },
       ]
     );
@@ -318,6 +715,77 @@ export default function ProjectsScreen() {
       "Edit Project",
       `Edit flow for "${project.title}" can be connected here.`
     );
+  };
+
+  const saveProjectToGallery = async (
+    project: Project,
+  ) => {
+    const videoUrl =
+      resolveProjectUrl(
+        project.videoUrl,
+      );
+
+    if (!videoUrl) {
+      Alert.alert(
+        "Video unavailable",
+        "This project does not have a saved video file.",
+      );
+      return;
+    }
+
+    try {
+      const permission =
+        await MediaLibrary.requestPermissionsAsync();
+
+      if (
+        !permission.granted
+      ) {
+        Alert.alert(
+          "Permission required",
+          "Please allow Photos/Gallery access to save the video.",
+        );
+        return;
+      }
+
+      const fileName =
+        `${project.id || "shivora-video"}-${Date.now()}.mp4`;
+
+      const targetUri =
+        `${FileSystem.cacheDirectory}${fileName}`;
+
+      const downloadResult =
+        await FileSystem.downloadAsync(
+          videoUrl,
+          targetUri,
+        );
+
+      if (
+        downloadResult.status !== 200
+      ) {
+        throw new Error(
+          `Video download failed with status ${downloadResult.status}.`,
+        );
+      }
+
+      await MediaLibrary.createAssetAsync(
+        downloadResult.uri,
+      );
+
+      Alert.alert(
+        "Saved",
+        "Video saved to your gallery.",
+      );
+    } catch (error) {
+      console.error(
+        "[PROJECTS] Failed to save project video:",
+        error,
+      );
+
+      Alert.alert(
+        "Save failed",
+        "We couldn't save this video to your gallery.",
+      );
+    }
   };
 
   const openMore = (project: Project) => {
@@ -608,14 +1076,13 @@ export default function ProjectsScreen() {
             </Text>
           </View>
 
-          <Pressable
+          <View
             style={[
               styles.creditPill,
               {
                 width: isSmall ? 112 : 124,
               },
             ]}
-            onPress={() => router.push('/coins')}
           >
             <Image
               source={ASSETS.coin}
@@ -626,7 +1093,7 @@ export default function ProjectsScreen() {
               12,450
             </Text>
             <Text style={styles.creditPlus}>+</Text>
-          </Pressable>
+          </View>
         </View>
 
         <ScrollView
@@ -835,144 +1302,6 @@ export default function ProjectsScreen() {
         </View>
 
         {/* ========================================================
-            CREATE NEW VIDEO CHOOSER
-           ======================================================== */}
-        <Modal
-          visible={showCreateVideoModal}
-          transparent
-          animationType="fade"
-          statusBarTranslucent
-          onRequestClose={() => setShowCreateVideoModal(false)}
-        >
-          <View style={styles.createModalOverlay}>
-            <Pressable
-              style={StyleSheet.absoluteFill}
-              onPress={() => setShowCreateVideoModal(false)}
-              accessibilityLabel="Close create video chooser"
-            />
-
-            <View style={styles.createVideoModal}>
-              <View style={styles.createVideoModalHeader}>
-                <View style={styles.createVideoModalHeadingWrap}>
-                  <Text style={styles.createVideoModalTitle}>
-                    Create New Video
-                  </Text>
-                  <Text style={styles.createVideoModalSubtitle}>
-                    Choose how you want to start your video.
-                  </Text>
-                </View>
-
-                <Pressable
-                  onPress={() => setShowCreateVideoModal(false)}
-                  hitSlop={10}
-                  style={({ pressed }) => [
-                    styles.modalCloseButton,
-                    pressed && styles.pressed,
-                  ]}
-                  accessibilityRole="button"
-                  accessibilityLabel="Close"
-                >
-                  <Ionicons
-                    name="close"
-                    size={22}
-                    color={COLORS.secondary}
-                  />
-                </Pressable>
-              </View>
-
-              <Pressable
-                onPress={handleOpenTextToVideo}
-                style={({ pressed }) => [
-                  styles.createChoiceCard,
-                  styles.createChoiceCardCyan,
-                  pressed && styles.createChoicePressed,
-                ]}
-                accessibilityRole="button"
-                accessibilityLabel="Create a video from text"
-              >
-                <View
-                  style={[
-                    styles.createChoiceIcon,
-                    styles.createChoiceIconCyan,
-                  ]}
-                >
-                  <Ionicons
-                    name="document-text-outline"
-                    size={29}
-                    color={COLORS.cyan}
-                  />
-                </View>
-
-                <View style={styles.createChoiceCopy}>
-                  <Text style={styles.createChoiceTitle}>
-                    Text to Video
-                  </Text>
-                  <Text style={styles.createChoiceDescription}>
-                    Describe your idea and let Shivora create the
-                    story, characters, scenes and voice.
-                  </Text>
-                </View>
-
-                <View style={styles.createChoiceArrow}>
-                  <Ionicons
-                    name="chevron-forward"
-                    size={22}
-                    color={COLORS.cyan}
-                  />
-                </View>
-              </Pressable>
-
-              <Pressable
-                onPress={handleOpenImageToVideo}
-                style={({ pressed }) => [
-                  styles.createChoiceCard,
-                  styles.createChoiceCardPurple,
-                  pressed && styles.createChoicePressed,
-                ]}
-                accessibilityRole="button"
-                accessibilityLabel="Create a video from an image"
-              >
-                <View
-                  style={[
-                    styles.createChoiceIcon,
-                    styles.createChoiceIconPurple,
-                  ]}
-                >
-                  <Ionicons
-                    name="image-outline"
-                    size={29}
-                    color={COLORS.purpleBright}
-                  />
-                </View>
-
-                <View style={styles.createChoiceCopy}>
-                  <Text style={styles.createChoiceTitle}>
-                    Image to Video
-                  </Text>
-                  <Text style={styles.createChoiceDescription}>
-                    Upload an image, describe the motion and bring
-                    your image to life with AI.
-                  </Text>
-                </View>
-
-                <View style={styles.createChoiceArrow}>
-                  <Ionicons
-                    name="chevron-forward"
-                    size={22}
-                    color={COLORS.purpleBright}
-                  />
-                </View>
-              </Pressable>
-
-              <Text style={styles.createVideoModalFooter}>
-                You can change your video settings after choosing a
-                creation method.
-              </Text>
-            </View>
-          </View>
-        </Modal>
-
-        {/* ========================================================
             MORE MENU
            ======================================================== */}
         <Modal
@@ -1026,10 +1355,28 @@ export default function ProjectsScreen() {
 
               <Pressable
                 style={styles.sheetRow}
-                onPress={() =>
-                  menu.project &&
-                  openProject(menu.project)
-                }
+                onPress={() => {
+                  if (menu.project?.videoUrl) {
+                    const projectToPlay =
+                      menu.project;
+
+                    setMenu({
+                      visible: false,
+                      project: null,
+                    });
+
+                    setPlayingProject(
+                      projectToPlay,
+                    );
+                    return;
+                  }
+
+                  if (menu.project) {
+                    openProject(
+                      menu.project,
+                    );
+                  }
+                }}
               >
                 <Ionicons
                   name="play-circle-outline"
@@ -1037,7 +1384,35 @@ export default function ProjectsScreen() {
                   color={COLORS.text}
                 />
                 <Text style={styles.sheetRowText}>
-                  Open Project
+                  Play Video
+                </Text>
+              </Pressable>
+
+              <Pressable
+                style={styles.sheetRow}
+                onPress={() => {
+                  const projectToSave =
+                    menu.project;
+
+                  setMenu({
+                    visible: false,
+                    project: null,
+                  });
+
+                  if (projectToSave) {
+                    void saveProjectToGallery(
+                      projectToSave,
+                    );
+                  }
+                }}
+              >
+                <Ionicons
+                  name="download-outline"
+                  size={23}
+                  color={COLORS.text}
+                />
+                <Text style={styles.sheetRowText}>
+                  Save Video to Gallery
                 </Text>
               </Pressable>
 
@@ -1224,6 +1599,13 @@ export default function ProjectsScreen() {
             </Pressable>
           </Pressable>
         </Modal>
+
+        <FullScreenVideoModal
+          project={playingProject}
+          onClose={() =>
+            setPlayingProject(null)
+          }
+        />
       </View>
     </SafeAreaView>
   );
@@ -1327,7 +1709,7 @@ const styles = StyleSheet.create({
 
   scrollContent: {
     paddingTop: 9,
-    paddingBottom: 108,
+    paddingBottom: 110,
   },
 
   searchRow: {
@@ -1434,12 +1816,13 @@ const styles = StyleSheet.create({
   },
 
   projectsList: {
-    gap: 10,
+    gap: 12,
   },
 
   projectCard: {
-    height: 142,
-    borderRadius: 18,
+    height: 158,
+    minHeight: 158,
+    borderRadius: 19,
     borderWidth: 1.25,
     borderColor: COLORS.border,
     backgroundColor: COLORS.surface,
@@ -1453,17 +1836,17 @@ const styles = StyleSheet.create({
   },
 
   thumbnailWrap: {
-    width: 104,
-    height: 142,
+    width: 122,
+    height: 158,
+    minHeight: 158,
     position: "relative",
     backgroundColor: "#020C14",
     overflow: "hidden",
-    flexShrink: 0,
   },
 
   thumbnail: {
-    width: 104,
-    height: 142,
+    width: "100%",
+    height: "100%",
   },
 
   thumbnailShade: {
@@ -1473,11 +1856,11 @@ const styles = StyleSheet.create({
 
   playButton: {
     position: "absolute",
-    left: 8,
-    bottom: 8,
-    width: 34,
-    height: 34,
-    borderRadius: 17,
+    left: 10,
+    bottom: 10,
+    width: 37,
+    height: 37,
+    borderRadius: 19,
     backgroundColor: "rgba(0,0,0,0.58)",
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.65)",
@@ -1488,12 +1871,12 @@ const styles = StyleSheet.create({
 
   durationBadge: {
     position: "absolute",
-    right: 7,
-    bottom: 7,
-    minWidth: 44,
-    height: 24,
-    borderRadius: 12,
-    paddingHorizontal: 6,
+    right: 8,
+    bottom: 9,
+    minWidth: 47,
+    height: 26,
+    borderRadius: 13,
+    paddingHorizontal: 7,
     backgroundColor: "rgba(0,0,0,0.72)",
     flexDirection: "row",
     alignItems: "center",
@@ -1503,15 +1886,15 @@ const styles = StyleSheet.create({
 
   durationText: {
     color: COLORS.text,
-    fontSize: 8.8,
+    fontSize: 9.5,
     fontWeight: "700",
   },
 
   projectInfo: {
     flex: 1,
     minWidth: 0,
-    paddingHorizontal: 11,
-    paddingVertical: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 11,
   },
 
   projectHeaderRow: {
@@ -1523,30 +1906,30 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 0,
     color: COLORS.text,
-    fontSize: 14,
-    lineHeight: 18,
+    fontSize: 14.5,
+    lineHeight: 19,
     fontWeight: "800",
   },
 
   favoriteButton: {
-    width: 26,
-    height: 26,
-    borderRadius: 13,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
     alignItems: "center",
     justifyContent: "center",
-    marginLeft: 5,
+    marginLeft: 6,
   },
 
   projectMetaRow: {
     flexDirection: "row",
     alignItems: "center",
-    marginTop: 6,
+    marginTop: 8,
     minWidth: 0,
   },
 
   projectType: {
-    fontSize: 10,
-    lineHeight: 13,
+    fontSize: 10.5,
+    lineHeight: 14,
     fontWeight: "700",
     marginLeft: 5,
     flexShrink: 1,
@@ -1562,8 +1945,8 @@ const styles = StyleSheet.create({
 
   projectDuration: {
     color: COLORS.secondary,
-    fontSize: 9.5,
-    lineHeight: 13,
+    fontSize: 10,
+    lineHeight: 14,
     marginLeft: 4,
     fontWeight: "500",
   },
@@ -1571,14 +1954,14 @@ const styles = StyleSheet.create({
   projectDateRow: {
     flexDirection: "row",
     alignItems: "center",
-    marginTop: 5,
+    marginTop: 6,
   },
 
   projectDate: {
     flex: 1,
     color: COLORS.secondary,
-    fontSize: 9,
-    lineHeight: 13,
+    fontSize: 9.5,
+    lineHeight: 14,
     marginLeft: 5,
   },
 
@@ -1590,14 +1973,14 @@ const styles = StyleSheet.create({
   },
 
   statusBadge: {
-    minWidth: 86,
-    height: 28,
-    borderRadius: 14,
-    paddingHorizontal: 8,
+    minWidth: 94,
+    height: 31,
+    borderRadius: 16,
+    paddingHorizontal: 9,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 4,
+    gap: 5,
   },
 
   statusCompleted: {
@@ -1619,20 +2002,101 @@ const styles = StyleSheet.create({
   },
 
   statusText: {
-    fontSize: 8.8,
-    lineHeight: 12,
+    fontSize: 9.5,
+    lineHeight: 13,
     fontWeight: "700",
   },
 
   moreButton: {
-    width: 34,
-    height: 32,
-    borderRadius: 13,
+    width: 38,
+    height: 34,
+    borderRadius: 14,
     borderWidth: 1,
     borderColor: COLORS.border,
     backgroundColor: COLORS.surfaceAlt,
     alignItems: "center",
     justifyContent: "center",
+  },
+
+  videoModalRoot: {
+    flex: 1,
+    backgroundColor: "#000000",
+  },
+
+  videoModalHeader: {
+    height: Platform.OS === "ios" ? 76 : 64,
+    paddingTop: Platform.OS === "ios" ? 18 : 8,
+    paddingHorizontal: 16,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    backgroundColor: "rgba(0,0,0,0.96)",
+  },
+
+  videoModalClose: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  videoModalTitle: {
+    flex: 1,
+    color: "#FFFFFF",
+    fontSize: 16,
+    fontWeight: "700",
+    textAlign: "center",
+    marginHorizontal: 8,
+  },
+
+  videoModalSave: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  videoModalPlayerWrap: {
+    flex: 1,
+    backgroundColor: "#000000",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  videoModalPlayer: {
+    width: "100%",
+    height: "100%",
+  },
+
+  videoModalEmpty: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 24,
+  },
+
+  videoModalEmptyText: {
+    color: "#FFFFFF",
+    marginTop: 12,
+    fontSize: 15,
+    fontWeight: "600",
+  },
+
+  videoModalFooter: {
+    minHeight: Platform.OS === "ios" ? 64 : 56,
+    paddingHorizontal: 18,
+    paddingBottom:
+      Platform.OS === "ios" ? 10 : 8,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#000000",
+  },
+
+  videoModalFooterText: {
+    color: "#AAB6BE",
+    fontSize: 11,
+    fontWeight: "500",
   },
 
   emptyState: {
@@ -1721,155 +2185,6 @@ const styles = StyleSheet.create({
   createPressed: {
     transform: [{ scale: 0.985 }],
     opacity: 0.9,
-  },
-
-  createModalOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(0, 0, 0, 0.68)",
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 18,
-  },
-
-  createVideoModal: {
-    width: "100%",
-    maxWidth: 420,
-    borderRadius: 24,
-    borderWidth: 1.2,
-    borderColor: "#214A5B",
-    backgroundColor: "#05141D",
-    paddingHorizontal: 16,
-    paddingTop: 16,
-    paddingBottom: 14,
-    shadowColor: COLORS.cyan,
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.16,
-    shadowRadius: 24,
-    elevation: 18,
-  },
-
-  createVideoModalHeader: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    justifyContent: "space-between",
-    marginBottom: 14,
-  },
-
-  createVideoModalHeadingWrap: {
-    flex: 1,
-    minWidth: 0,
-    paddingRight: 10,
-  },
-
-  createVideoModalTitle: {
-    color: COLORS.text,
-    fontSize: 19,
-    lineHeight: 24,
-    fontWeight: "800",
-  },
-
-  createVideoModalSubtitle: {
-    marginTop: 4,
-    color: COLORS.secondary,
-    fontSize: 10.5,
-    lineHeight: 15,
-  },
-
-  modalCloseButton: {
-    width: 38,
-    height: 38,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    backgroundColor: COLORS.surfaceAlt,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-
-  createChoiceCard: {
-    minHeight: 98,
-    borderRadius: 18,
-    borderWidth: 1.1,
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 12,
-    paddingVertical: 11,
-    marginTop: 9,
-  },
-
-  createChoiceCardCyan: {
-    borderColor: "#146170",
-    backgroundColor: "#061F29",
-  },
-
-  createChoiceCardPurple: {
-    borderColor: "#6039A0",
-    backgroundColor: "#160C29",
-  },
-
-  createChoiceIcon: {
-    width: 54,
-    height: 54,
-    borderRadius: 17,
-    alignItems: "center",
-    justifyContent: "center",
-    flexShrink: 0,
-  },
-
-  createChoiceIconCyan: {
-    backgroundColor: "#072F3A",
-    borderWidth: 1,
-    borderColor: "#16596A",
-  },
-
-  createChoiceIconPurple: {
-    backgroundColor: "#27143F",
-    borderWidth: 1,
-    borderColor: "#5A3A86",
-  },
-
-  createChoiceCopy: {
-    flex: 1,
-    minWidth: 0,
-    marginLeft: 11,
-    paddingRight: 6,
-  },
-
-  createChoiceTitle: {
-    color: COLORS.text,
-    fontSize: 15,
-    lineHeight: 19,
-    fontWeight: "800",
-  },
-
-  createChoiceDescription: {
-    marginTop: 4,
-    color: COLORS.secondary,
-    fontSize: 9.7,
-    lineHeight: 14,
-  },
-
-  createChoiceArrow: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    alignItems: "center",
-    justifyContent: "center",
-    flexShrink: 0,
-  },
-
-  createChoicePressed: {
-    transform: [{ scale: 0.985 }],
-    opacity: 0.9,
-  },
-
-  createVideoModalFooter: {
-    marginTop: 12,
-    color: COLORS.muted,
-    fontSize: 8.8,
-    lineHeight: 13,
-    textAlign: "center",
-    paddingHorizontal: 8,
   },
 
   modalRoot: {

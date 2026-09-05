@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   Alert,
   Image,
@@ -43,10 +43,8 @@ import { useLocalSearchParams, useRouter } from "expo-router";
  *   /characters
  *   /characters?mode=select
  *
- * NOTE:
- * The sample character data below is local UI data for now.
- * Connect it to the app's real character store/API when that
- * data layer is ready. No external package is required here.
+ * Character data is loaded from the backend character API.
+ * Local assets are kept only as visual fallbacks.
  * ============================================================
  */
 
@@ -57,32 +55,66 @@ type Character = {
   name: string;
   role: CharacterRole;
   description: string;
+  imageUrl: string;
   image: any;
 };
 
-const INITIAL_CHARACTERS: Character[] = [
-  {
-    id: "alex",
-    name: "Alex",
-    role: "Main Character",
-    description: "Young boy with red hair, fair skin and a blue hoodie.",
-    image: require("../assets/ai-character-main.png"),
+const API_BASE_URL =
+  "http://192.168.31.189:4000";
+
+const resolveCharacterImageUrl = (
+  imageUrl?: string,
+): string | undefined => {
+  if (!imageUrl?.trim()) {
+    return undefined;
+  }
+
+  const normalized = imageUrl.trim();
+
+  if (
+    normalized.startsWith("http://") ||
+    normalized.startsWith("https://")
+  ) {
+    return normalized;
+  }
+
+  return `${API_BASE_URL}${
+    normalized.startsWith("/") ? "" : "/"
+  }${normalized}`;
+};
+
+const getLocalCharacterImage = (
+  character: {
+    id: string;
+    name: string;
   },
-  {
-    id: "shopkeeper",
-    name: "Shopkeeper",
-    role: "Supporting",
-    description: "Friendly man with black hair, beard and an apron.",
-    image: require("../assets/ai-character-shopkeeper.png"),
-  },
-  {
-    id: "vamika",
-    name: "Vamika",
-    role: "Main Character",
-    description: "Young girl with a cheerful look and colorful styling.",
-    image: require("../assets/vamika-character.png"),
-  },
-];
+) => {
+  const normalizedName =
+    character.name.trim().toLowerCase();
+
+  if (
+    normalizedName === "alex" ||
+    character.id === "alex"
+  ) {
+    return require("../assets/ai-character-main.png");
+  }
+
+  if (
+    normalizedName === "shopkeeper" ||
+    character.id === "shopkeeper"
+  ) {
+    return require("../assets/ai-character-shopkeeper.png");
+  }
+
+  if (
+    normalizedName === "vamika" ||
+    character.id === "vamika"
+  ) {
+    return require("../assets/vamika-character.png");
+  }
+
+  return require("../assets/ai-character-main.png");
+};
 
 const COLORS = {
   background: "#020A10",
@@ -110,9 +142,20 @@ type MoreMenuState = {
 export default function MyCharactersScreen() {
   const router = useRouter();
   const { width } = useWindowDimensions();
-  const params = useLocalSearchParams<{ mode?: string }>();
+  const params = useLocalSearchParams<{
+    mode?: string;
+    targetCharacterId?: string;
+    targetCharacterName?: string;
+    story?: string;
+    analysis?: string;
+    customization?: string;
+  }>();
 
   const selectionMode = params.mode === "select";
+  const targetCharacterId =
+    typeof params.targetCharacterId === "string"
+      ? params.targetCharacterId
+      : undefined;
 
   const isSmall = width <= 375;
   const isLarge = width >= 430;
@@ -122,9 +165,13 @@ export default function MyCharactersScreen() {
   const gridGap = isSmall ? 9 : 12;
   const cardWidth = (contentWidth - gridGap * 2) / 3;
 
-  const [characters, setCharacters] = useState<Character[]>(
-    INITIAL_CHARACTERS
-  );
+  const [characters, setCharacters] =
+    useState<Character[]>([]);
+  const [charactersLoading, setCharactersLoading] =
+    useState(true);
+  const [charactersError, setCharactersError] =
+    useState<string | null>(null);
+
   const [query, setQuery] = useState("");
   const [roleFilter, setRoleFilter] = useState<"All" | CharacterRole>("All");
   const [listView, setListView] = useState(false);
@@ -136,6 +183,96 @@ export default function MyCharactersScreen() {
   const [filterVisible, setFilterVisible] = useState(false);
   const [detailsCharacter, setDetailsCharacter] =
     useState<Character | null>(null);
+
+  useEffect(() => {
+    let active = true;
+
+    const loadCharacters =
+      async () => {
+        try {
+          setCharactersLoading(true);
+          setCharactersError(null);
+
+          const response =
+            await fetch(
+              `${API_BASE_URL}/characters`,
+            );
+
+          if (!response.ok) {
+            throw new Error(
+              `Failed to load characters (${response.status}).`,
+            );
+          }
+
+          const data =
+            (await response.json()) as {
+              success?: boolean;
+              characters?: Array<{
+                id: string;
+                name: string;
+                role: CharacterRole;
+                description: string;
+                imageUrl: string;
+              }>;
+              error?: string;
+            };
+
+          if (
+            !data.success ||
+            !Array.isArray(
+              data.characters,
+            )
+          ) {
+            throw new Error(
+              data.error ||
+                "Invalid character response.",
+            );
+          }
+
+          if (!active) {
+            return;
+          }
+
+          setCharacters(
+            data.characters.map(
+              (character) => ({
+                ...character,
+                image:
+                  getLocalCharacterImage(
+                    character,
+                  ),
+              }),
+            ),
+          );
+        } catch (error) {
+          if (!active) {
+            return;
+          }
+
+          console.error(
+            "[MY CHARACTERS] Failed to load characters:",
+            error,
+          );
+
+          setCharactersError(
+            error instanceof Error
+              ? error.message
+              : "Unable to load characters.",
+          );
+          setCharacters([]);
+        } finally {
+          if (active) {
+            setCharactersLoading(false);
+          }
+        }
+      };
+
+    void loadCharacters();
+
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const filteredCharacters = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
@@ -173,6 +310,13 @@ export default function MyCharactersScreen() {
   const toggleSelected = (id: string) => {
     if (!selectionMode) return;
 
+    if (targetCharacterId) {
+      setSelectedIds((current) =>
+        current.includes(id) ? [] : [id]
+      );
+      return;
+    }
+
     setSelectedIds((current) =>
       current.includes(id)
         ? current.filter((item) => item !== id)
@@ -201,13 +345,52 @@ export default function MyCharactersScreen() {
       return;
     }
 
-    /*
-     * UI-ready selection flow:
-     * The next integration step will return these IDs to
-     * Customize Your Video and replace the detected character(s).
-     *
-     * For now, keep the current navigation stack intact.
-     */
+    const selected = selectedCharacters[0];
+
+    if (targetCharacterId && selected) {
+      const imageUrl =
+        resolveCharacterImageUrl(
+          selected.imageUrl,
+        );
+
+      if (!imageUrl) {
+        Alert.alert(
+          "Character image unavailable",
+          "This saved character does not have a usable image reference yet.",
+        );
+
+        return;
+      }
+
+      router.replace({
+        pathname: "/customize-story" as any,
+        params: {
+          story:
+            typeof params.story === "string"
+              ? params.story
+              : "",
+          analysis:
+            typeof params.analysis === "string"
+              ? params.analysis
+              : "",
+          customization:
+            typeof params.customization === "string"
+              ? params.customization
+              : "",
+          selectedCharacterId: targetCharacterId,
+          selectedSavedCharacter: JSON.stringify({
+            id: selected.id,
+            name: selected.name,
+            role: selected.role,
+            description:
+              selected.description,
+            imageUrl,
+          }),
+        },
+      });
+      return;
+    }
+
     router.back();
   };
 
@@ -284,7 +467,17 @@ export default function MyCharactersScreen() {
         ]}
       >
         <Image
-          source={character.image}
+          source={
+            character.imageUrl
+              ? {
+                  uri:
+                    resolveCharacterImageUrl(
+                      character.imageUrl,
+                    ),
+                }
+              : character.image
+          }
+          defaultSource={character.image}
           resizeMode="contain"
           style={[
             styles.avatarImage,
@@ -293,6 +486,9 @@ export default function MyCharactersScreen() {
               height: compact ? size * 0.9 : size * 0.96,
             },
           ]}
+          onError={() => {
+            // The local asset remains available as a visual fallback.
+          }}
         />
       </View>
     );
@@ -339,7 +535,11 @@ export default function MyCharactersScreen() {
               style={styles.headerTitle}
               numberOfLines={1}
             >
-              My Characters
+              {selectionMode
+                ? targetCharacterId
+                  ? "Choose Saved Character"
+                  : "Select Characters"
+                : "My Characters"}
             </Text>
           </View>
 
@@ -497,7 +697,43 @@ export default function MyCharactersScreen() {
           {/* =========================================================
               CHARACTER LIBRARY
              ========================================================= */}
-          {filteredCharacters.length === 0 ? (
+          {charactersLoading ? (
+            <View style={styles.emptyState}>
+              <View style={styles.emptyIcon}>
+                <Ionicons
+                  name="sync-outline"
+                  size={34}
+                  color={COLORS.cyan}
+                />
+              </View>
+
+              <Text style={styles.emptyTitle}>
+                Loading Characters
+              </Text>
+
+              <Text style={styles.emptyDescription}>
+                Fetching your saved characters...
+              </Text>
+            </View>
+          ) : charactersError ? (
+            <View style={styles.emptyState}>
+              <View style={styles.emptyIcon}>
+                <Ionicons
+                  name="alert-circle-outline"
+                  size={34}
+                  color={COLORS.danger}
+                />
+              </View>
+
+              <Text style={styles.emptyTitle}>
+                Unable to Load Characters
+              </Text>
+
+              <Text style={styles.emptyDescription}>
+                {charactersError}
+              </Text>
+            </View>
+          ) : filteredCharacters.length === 0 ? (
             <View style={styles.emptyState}>
               <View style={styles.emptyIcon}>
                 <Ionicons
@@ -882,8 +1118,11 @@ export default function MyCharactersScreen() {
                 style={styles.useSelectedGradient}
               >
                 <Text style={styles.useSelectedText}>
-                  Use Selected
-                  {selectedCharacters.length > 0
+                  {targetCharacterId
+                    ? "Use for This Character"
+                    : "Use Selected"}
+                  {!targetCharacterId &&
+                  selectedCharacters.length > 0
                     ? ` (${selectedCharacters.length})`
                     : ""}
                 </Text>

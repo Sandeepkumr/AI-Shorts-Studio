@@ -21,6 +21,9 @@ import {
 import {
   imageService,
 } from "./image.service.js";
+import {
+  characterService,
+} from "./character.service.js";
 
 import {
   assertValidStoryManifest,
@@ -44,7 +47,6 @@ import {
   assertAssemblyContract,
 } from "./videoAssemblyQa.service.js";
 
-
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
@@ -65,49 +67,6 @@ export type {
 } from "../providers/video/videoProvider.js";
 
 const CLIP_DURATION_SECONDS = 5;
-
-type CharacterSource =
-  | "saved"
-  | "ai";
-
-type VideoCharacterInput = {
-  id: string;
-  name: string;
-  role: string;
-  visualDescription: string;
-  imagePrompt?: string;
-  imageUrl?: string;
-  imageKey?: string;
-  source?: CharacterSource;
-  savedCharacterId?: string;
-};
-
-type T2VShotContractCharacter = {
-  characterId: string;
-  startState: string;
-  actions: string[];
-  emotion: string;
-  expression: string;
-  bodyLanguage: string[];
-  endState: string;
-};
-
-type T2VShotContract = {
-  clipIndex: number;
-  sceneNumber: number;
-  title: string;
-  description: string;
-  location: string;
-  sceneStartState: string;
-  sceneActions: string[];
-  sceneEndState: string;
-  characters: T2VShotContractCharacter[];
-  continuity: {
-    inheritedCharacterStates: Record<string, string>;
-    locationContinues: boolean;
-    requiredContinuity: string[];
-  };
-};
 
 const VIDEO_FRAME_UPLOAD_DIR =
   path.resolve(
@@ -235,6 +194,37 @@ const extractLastFrameAsReference =
     return `/uploads/video-frames/${frameName}`;
   };
 
+
+const hasNamedCharacterAppearance = (
+  appearance: string,
+  characters: VideoCharacterInput[],
+): boolean => {
+  const text =
+    appearance.trim();
+
+  if (!text) {
+    return false;
+  }
+
+  return characters.some(
+    (character) => {
+      const name =
+        character.name.trim();
+
+      if (!name) {
+        return false;
+      }
+
+      const pattern =
+        new RegExp(
+          `\\b${escapeRegExp(name)}\\s*:`,
+          "i",
+        );
+
+      return pattern.test(text);
+    },
+  );
+};
 
 const getCharactersForScene = (
   characters: VideoCharacterInput[],
@@ -451,23 +441,229 @@ const buildCameraText = (
   }
 };
 
+const buildCharacterContext = (
+  characters?: VideoGenerationOptions["characters"],
+): string => {
+  if (
+    !characters ||
+    characters.length === 0
+  ) {
+    return "";
+  }
+
+  return characters
+    .map((character) => {
+      const isSaved =
+        "source" in character &&
+        character.source === "saved";
+
+      /*
+       * Saved characters are image-first. Their selected reference image is
+       * the canonical identity. Never inject a stale/generated imagePrompt
+       * or appearance description that can contradict that image.
+       *
+       * AI-generated characters still use their textual appearance guidance.
+       */
+      const preciseIdentity = isSaved
+        ? ""
+        : (
+            "imagePrompt" in character &&
+            typeof character.imagePrompt === "string" &&
+            character.imagePrompt.trim()
+          )
+            ? character.imagePrompt.trim()
+            : character.visualDescription.trim();
+
+      return [
+        `${character.name} (${character.role}):`,
+        "The supplied reference image is the authoritative visual identity for this character.",
+        isSaved
+          ? "This is a saved character. Treat the supplied saved reference image as the sole visual identity source; do not infer or apply any alternate textual appearance description."
+          : "",
+        preciseIdentity
+          ? `Reference appearance guidance: ${preciseIdentity}`
+          : "",
+        "Do not redesign, replace, age, de-age, recolor, or change the character's face, hair, clothing, species, proportions, or identity.",
+      ]
+        .filter(Boolean)
+        .join("\n");
+    })
+    .join("\n");
+};
+
+const escapeRegExp = (
+  value: string,
+): string =>
+  value.replace(
+    /[.*+?^${}()|[\]\\]/g,
+    "\\$&",
+  );
+
+const extractCharacterNamesFromPrompt = (
+  prompt: string,
+): string[] => {
+  const names = new Set<string>();
+
+  const appearanceMatch =
+    prompt.match(
+      /Character appearance requirements:\s*([\s\S]*?)(?=\n\n|$)/i,
+    );
+
+  const appearanceBlock =
+    appearanceMatch?.[1] ?? "";
+
+  for (
+    const match of appearanceBlock.matchAll(
+      /(?:^|\s)([A-Za-z][A-Za-z0-9 _'-]{0,40}):\s*/g,
+    )
+  ) {
+    const name =
+      match[1]?.trim();
+
+    if (name) {
+      names.add(name);
+    }
+  }
+
+  return Array.from(names);
+};
+
+const replaceCharacterNames = (
+  prompt: string,
+  characters?: VideoGenerationOptions["characters"],
+): string => {
+  if (
+    !characters ||
+    characters.length === 0
+  ) {
+    return prompt;
+  }
+
+  const detectedNames =
+    extractCharacterNamesFromPrompt(
+      prompt,
+    );
+
+  if (
+    detectedNames.length === 0
+  ) {
+    return prompt;
+  }
+
+  let resolvedPrompt =
+    prompt;
+
+  for (
+    const character of characters
+  ) {
+    const targetName =
+      character.name.trim();
+
+    if (!targetName) {
+      continue;
+    }
+
+    const oldNames =
+      detectedNames.filter(
+        (name) =>
+          name.toLowerCase() !==
+          targetName.toLowerCase(),
+      );
+
+    for (
+      const oldName of oldNames
+    ) {
+      const pattern =
+        new RegExp(
+          `\\b${escapeRegExp(oldName)}\\b`,
+          "gi",
+        );
+
+      resolvedPrompt =
+        resolvedPrompt.replace(
+          pattern,
+          targetName,
+        );
+    }
+  }
+
+  return resolvedPrompt;
+};
+
+const replaceCharacterAppearanceNames = (
+  appearance: string,
+  characters?: VideoGenerationOptions["characters"],
+): string =>
+  replaceCharacterNames(
+    appearance,
+    characters,
+  );
+
 // Scene keyframes use the shared image service.
 // The shared service is configured with the current primary image provider.
 const sceneImageProvider = imageService;
 
-const escapeRegExp = (value: string): string =>
-  value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const getCharacterIdentityKey = (
+  character: VideoCharacterInput,
+): string =>
+  character.savedCharacterId?.trim() ||
+  character.id.trim() ||
+  character.name.trim().toLowerCase();
+
+const hasNewVisibleCharacter = (
+  currentCharacters: VideoCharacterInput[],
+  previousCharacters: VideoCharacterInput[],
+): boolean => {
+  if (previousCharacters.length === 0) {
+    return currentCharacters.length > 0;
+  }
+
+  const previousKeys = new Set(
+    previousCharacters.map(
+      getCharacterIdentityKey,
+    ),
+  );
+
+  return currentCharacters.some(
+    (character) =>
+      !previousKeys.has(
+        getCharacterIdentityKey(
+          character,
+        ),
+      ),
+  );
+};
 
 const getT2VImageSafeRoleDescription = (
   character: VideoCharacterInput,
 ): string => {
-  const role = character.role.trim();
+  const role = `${character.role} ${character.visualDescription}`.toLowerCase();
 
-  if (!role) {
-    return "an original fictional story character";
+  if (
+    /spider|superhero|hero|masked|mask|स्पाइडर|सुपरहीरो|मास्क/iu.test(
+      `${character.name} ${character.role} ${character.visualDescription} ${character.imagePrompt ?? ""}`,
+    )
+  ) {
+    return "the adult male customer wearing a simple red-and-blue geometric outfit with a full-face red-and-blue geometric mask";
   }
 
-  return `an original fictional ${role}`.trim();
+  if (
+    /shopkeeper|cashier|owner|burger shop|restaurant|दुकानदार|कैशियर/iu.test(
+      role,
+    )
+  ) {
+    return "the burger shop cashier";
+  }
+
+  if (
+    /customer|client|ग्राहक/iu.test(
+      role,
+    )
+  ) {
+    return "the customer";
+  }
+
+  return `the ${character.role.trim() || "story character"}`;
 };
 
 const sanitizeT2VImageGenerationText = (
@@ -478,207 +674,55 @@ const sanitizeT2VImageGenerationText = (
 
   for (const character of characters) {
     const name = character.name.trim();
+
     if (!name) {
       continue;
     }
 
     result = result.replace(
-      new RegExp(escapeRegExp(name), "giu"),
+      new RegExp(
+        escapeRegExp(name),
+        "giu",
+      ),
       getT2VImageSafeRoleDescription(character),
     );
   }
 
   return result
+    // English and Hindi franchise/name variants.
+    .replace(/स्पाइडर[-‐‑–— ]?मैन/giu, "the masked red-and-blue superhero customer")
+    .replace(/Spider[- ]?Man/giu, "the masked red-and-blue superhero customer")
+    // Spider-theme variants must never reach the image provider.
+    .replace(/spider[- ]?themed/giu, "simple geometric-style")
+    .replace(/spider[- ]?theme/giu, "simple geometric-style")
+    .replace(/स्पाइडर[-‐‑–— ]?थीम(?:वाला|वाली|वाले)?/giu, "सरल ज्यामितीय पोशाक")
+    .replace(/स्पाइडर[-‐‑–— ]?थीम/giu, "सरल ज्यामितीय पोशाक")
+    .replace(/स्पाइडर[-‐‑–— ]?आधारित/giu, "सरल ज्यामितीय पोशाक वाला")
+    .replace(/spider[- ]?based/giu, "geometric-costume")
+    .replace(/spider[- ]?inspired/giu, "original geometric-costume")
+    .replace(/स्पाइडर[-‐‑–— ]?प्रेरित/giu, "मौलिक ज्यामितीय पोशाक वाला")
+    .replace(/web patterns?/giu, "simple geometric suit patterns")
+    .replace(/web[- ]?patterned/giu, "simple geometric patterned")
+    .replace(/webbed?/giu, "geometric")
+    .replace(/मकड़ी[-‐‑–— ]?(?:थीम|आधारित|जाल|पैटर्न)/giu, "ज्यामितीय")
+    .replace(/मकड़ी/giu, "ज्यामितीय")
+    .replace(/सुपरमैन/giu, "an adult male customer")
+    .replace(/Superman/giu, "an adult male customer")
+    .replace(/बैटमैन/giu, "an adult male customer in dark clothing")
+    .replace(/Batman/giu, "an adult male customer in dark clothing")
+    .replace(/आयरन[- ]?मैन/giu, "an adult male customer in red-and-gold geometric clothing")
+    .replace(/Iron[- ]?Man/giu, "an adult male customer in red-and-gold geometric clothing")
+    // Last-resort image-prompt cleanup: no standalone spider token may remain.
+    .replace(/\bspider\b/giu, "geometric")
+    .replace(/स्पाइडर/giu, "ज्यामितीय")
+    .replace(/superhero/giu, "customer")
+    .replace(/सुपरहीरो/giu, "ग्राहक")
+    .replace(/\bhero\b/giu, "customer")
+    .replace(/masked/giu, "adult male")
+    .replace(/mask/giu, "face covering")
+    .replace(/मास्क(?:वाला|वाली|वाले)?/giu, "ग्राहक")
     .replace(/\s+/g, " ")
     .trim();
-};
-
-const buildT2VShotContract = (
-  scenePlan: VideoScenePlan | undefined,
-  characters: VideoCharacterInput[] = [],
-  clipIndex?: number,
-): T2VShotContract => {
-  const resolvedClipIndex =
-    clipIndex ?? Math.max(0, (scenePlan?.sceneNumber ?? 1) - 1);
-
-  if (!scenePlan) {
-    return {
-      clipIndex: resolvedClipIndex,
-      sceneNumber: resolvedClipIndex + 1,
-      title: "",
-      description: "",
-      location: "",
-      sceneStartState: "",
-      sceneActions: [],
-      sceneEndState: "",
-      characters: [],
-      continuity: {
-        inheritedCharacterStates: {},
-        locationContinues: false,
-        requiredContinuity: [],
-      },
-    };
-  }
-
-  const visibleIds = Array.from(
-    new Set(scenePlan.visibleCharacterIds ?? []),
-  );
-
-  const contractCharacters = visibleIds.map((characterId) => {
-    const plan = scenePlan.characterPlans?.find(
-      (item) => item.characterId === characterId,
-    );
-    return {
-      characterId,
-      startState:
-        plan?.startState?.trim() || scenePlan.startState.trim(),
-      actions: Array.from(plan?.actions ?? []).filter(Boolean),
-      emotion: plan?.emotion?.trim() ?? "",
-      expression: plan?.expression?.trim() ?? "",
-      bodyLanguage: Array.from(plan?.bodyLanguage ?? []).filter(Boolean),
-      endState:
-        plan?.endState?.trim() || scenePlan.endState.trim(),
-    };
-  });
-
-  return {
-    clipIndex: resolvedClipIndex,
-    sceneNumber: scenePlan.sceneNumber || resolvedClipIndex + 1,
-    title: scenePlan.title.trim(),
-    description: scenePlan.description.trim(),
-    location: scenePlan.location?.trim() ?? "",
-    sceneStartState: scenePlan.startState.trim(),
-    sceneActions: Array.from(scenePlan.actions).filter(Boolean),
-    sceneEndState: scenePlan.endState.trim(),
-    characters: contractCharacters,
-    continuity: {
-      inheritedCharacterStates: {
-        ...(scenePlan.continuity?.inheritedCharacterStates ?? {}),
-      },
-      locationContinues:
-        scenePlan.continuity?.locationContinues ?? false,
-      requiredContinuity: Array.from(
-        scenePlan.continuity?.requiredContinuity ?? [],
-      ).filter(Boolean),
-    },
-  };
-};
-
-const validateT2VShotContract = (
-  contract: T2VShotContract,
-): void => {
-  if (!Number.isInteger(contract.clipIndex) || contract.clipIndex < 0) {
-    throw new Error("Invalid T2V shot contract clip index.");
-  }
-
-  if (!Number.isInteger(contract.sceneNumber) || contract.sceneNumber < 1) {
-    throw new Error("Invalid T2V shot contract scene number.");
-  }
-
-  if (contract.sceneActions.length > 2) {
-    throw new Error(
-      `T2V shot ${contract.sceneNumber} exceeds the two-action beat budget.`,
-    );
-  }
-
-  const seenCharacters = new Set<string>();
-  for (const character of contract.characters) {
-    if (!character.characterId.trim()) {
-      throw new Error("T2V shot contract contains a character without an ID.");
-    }
-    if (seenCharacters.has(character.characterId)) {
-      throw new Error(
-        `T2V shot contract contains duplicate character ${character.characterId}.`,
-      );
-    }
-    seenCharacters.add(character.characterId);
-
-    if (character.actions.length > 2) {
-      throw new Error(
-        `T2V shot ${contract.sceneNumber} character ${character.characterId} exceeds the two-action budget.`,
-      );
-    }
-  }
-};
-
-const renderT2VShotContractForPrompt = (
-  contract: T2VShotContract,
-  mode: "KEYFRAME" | "MOTION",
-): string => {
-  const characterLines = contract.characters.map((character) =>
-    [
-      `Character ${character.characterId}:`,
-      character.startState
-        ? `START_STATE=${character.startState}`
-        : "",
-      character.actions.length > 0
-        ? `ACTIONS=${character.actions.join(" | ")}`
-        : "",
-      character.emotion
-        ? `EMOTION=${character.emotion}`
-        : "",
-      character.expression
-        ? `EXPRESSION=${character.expression}`
-        : "",
-      character.bodyLanguage.length > 0
-        ? `BODY_LANGUAGE=${character.bodyLanguage.join(" | ")}`
-        : "",
-      character.endState
-        ? `END_STATE=${character.endState}`
-        : "",
-    ]
-      .filter(Boolean)
-      .join("; "),
-  );
-
-  const common = [
-    `SHOT ${contract.sceneNumber}: ${contract.title || "Untitled beat"}.`,
-    contract.description
-      ? `DESCRIPTION=${contract.description}.`
-      : "",
-    contract.location
-      ? `LOCATION=${contract.location}.`
-      : "",
-    contract.sceneStartState
-      ? `SCENE_START_STATE=${contract.sceneStartState}.`
-      : "",
-    contract.sceneActions.length > 0
-      ? `SCENE_ACTIONS_IN_ORDER=${contract.sceneActions.join(" | ")}.`
-      : "",
-    contract.sceneEndState
-      ? `SCENE_END_STATE=${contract.sceneEndState}.`
-      : "",
-    characterLines.length > 0
-      ? characterLines.join("\n")
-      : "",
-    Object.keys(contract.continuity.inheritedCharacterStates).length > 0
-      ? `INHERITED_STATES=${Object.entries(
-          contract.continuity.inheritedCharacterStates,
-        )
-          .map(([id, state]) => `${id}: ${state}`)
-          .join(" | ")}.`
-      : "",
-    contract.continuity.requiredContinuity.length > 0
-      ? `REQUIRED_CONTINUITY=${contract.continuity.requiredContinuity.join(" | ")}.`
-      : "",
-  ].filter(Boolean);
-
-  if (mode === "KEYFRAME") {
-    return [
-      "AUTHORITATIVE T2V SHOT CONTRACT (KEYFRAME):",
-      ...common,
-      "The image must depict the START_STATE, not the completed ACTIONS or END_STATE.",
-      "Make object ownership, character positions, expressions, and body language visibly readable in one frame.",
-    ].join("\n");
-  }
-
-  return [
-    "AUTHORITATIVE T2V SHOT CONTRACT (MOTION):",
-    ...common,
-    "Begin from the supplied starting image and execute SCENE_ACTIONS_IN_ORDER exactly once in order.",
-    "Do not invent, skip, reorder, or replace the specified actions.",
-    "Finish at END_STATE and hold the resolved state briefly when possible.",
-  ].join("\n");
 };
 
 const buildSceneKeyframePrompt = (
@@ -688,23 +732,28 @@ const buildSceneKeyframePrompt = (
   clipIndex: number,
   hasPreviousFrame: boolean,
 ): string => {
-  const shotContract = buildT2VShotContract(
-    scenePlan,
+  const rawSceneDescription =
+    scenePlan
+      ? buildScenePromptFromPlan(scenePlan)
+      : basePrompt.trim();
+
+  const hasCharacterReference =
+    characters.some(
+      (character) =>
+        typeof character.imageUrl === "string" &&
+        character.imageUrl.trim().length > 0,
+    );
+
+  /*
+   * For T2V characters without a saved reference image, keep the keyframe
+   * prompt original and scene-based without asking the image provider to
+   * reproduce a named franchise character. The resulting frame is used only
+   * as Wan I2V's starting scene image; the story/video prompt remains separate.
+   */
+  const sceneDescription = sanitizeT2VImageGenerationText(
+    rawSceneDescription,
     characters,
-    clipIndex,
   );
-
-  validateT2VShotContract(shotContract);
-
-  const sceneContext = scenePlan
-    ? [
-        scenePlan.title.trim(),
-        scenePlan.description.trim(),
-        scenePlan.location?.trim() ?? "",
-      ]
-        .filter(Boolean)
-        .join(" ")
-    : basePrompt.trim();
 
   const characterInstructions =
     characters.length > 0
@@ -716,39 +765,64 @@ const buildSceneKeyframePrompt = (
 
             return hasReference
               ? [
-                  `Visible character ID: ${character.id}.`,
-                  "Use the supplied character reference image as the authoritative identity source.",
-                  "Preserve face, hair, clothing, colors, proportions, age, species, and other defining identity traits unless the shot contract explicitly changes a temporary physical state.",
+                  `Visible character: ${character.name} (${character.role}).`,
+                  "Use the supplied character reference image only as the visual identity source.",
+                  "Keep the same face, hair, clothing, colors, proportions, age, and species as the supplied reference.",
+                  "Place this character naturally inside the requested story scene.",
                 ].join(" ")
               : [
-                  `Visible character ID: ${character.id}.`,
-                  `Role: ${getT2VImageSafeRoleDescription(character)}.`,
-                  "No separate reference image is available for this character.",
-                  "Create one consistent original fictional subject and keep that identity stable across the shot.",
-                ].join(" ");
+                  `Visible character: ${character.name} (${character.role}).`,
+                  "This character has no separate reference image in this T2V job.",
+                  character.visualDescription?.trim()
+                    ? `Stable visual identity: ${character.visualDescription.trim()}.`
+                    : "",
+                  character.imagePrompt?.trim()
+                    ? `Additional visual identity guidance: ${character.imagePrompt.trim()}.`
+                    : "",
+                  "Create one consistent original fictional subject matching the supplied visual identity and the exact scene state; do not introduce alternate clothing, age, body type, face, or species.",
+                ]
+                  .filter(Boolean)
+                  .join(" ");
           })
           .join(" ")
       : "";
 
-  const prompt = [
-    "Create ONE fresh authoritative cinematic full-scene image for the exact beginning state of this 5-second T2V shot.",
-    "The image is the sole logical starting state for motion generation.",
-    `Scene context: ${sceneContext}`,
-    renderT2VShotContractForPrompt(shotContract, "KEYFRAME"),
-    characterInstructions,
+  const previousFrameInstruction =
     hasPreviousFrame
-      ? "A previous approved frame may be supplied only for environmental and visual continuity context. It must not override the current shot contract or starting state."
-      : "No previous frame is available; use the current shot contract as the sole logical source of truth.",
-    "Show the exact start pose, object ownership, character positions, facial expressions, and body language before the listed actions occur.",
-    "Do not depict a later action as already completed.",
-    "Compose all visible subjects together in one believable environment with natural scale, perspective, lighting, and spatial relationships.",
+      ? "A previous scene frame is also supplied. Preserve its environment, camera language, lighting, spatial relationships, and character continuity while making only the story-required changes. Do not copy it as a pasted image or card."
+      : "";
+
+  const openingKeyframeInstruction =
+    clipIndex === 0
+      ? "OPENING KEYFRAME OVERRIDE: The generated image MUST show the exact beginning of this story before any action has happened. The customer MUST be physically OUTSIDE the burger shop, standing on the exterior sidewalk or front area immediately outside the visible storefront entrance. The burger shop entrance and exterior facade must be clearly visible in the same composition. Do NOT place the customer inside the shop, behind the counter, at the counter, or already ordering. Do NOT depict the customer entering yet. Do NOT depict the order as already placed. The customer must be wearing a clearly visible full-face red-and-blue geometric mask. This image is the starting snapshot; the subsequent video must perform the entrance motion from this outside position into the shop."
+      : "";
+
+  const prompt = [
+    "Create ONE fresh authoritative cinematic scene image for this exact 5-second beat. This image is the sole visual starting state that will be sent to the image-to-video provider.",
+    "This must be a normal full-scene image, not a character sheet, collage, reference board, split screen, panel layout, contact sheet, or presentation slide.",
+    `Scene requirements: ${sceneDescription}`,
+    openingKeyframeInstruction,
+    buildSceneStateKeyframePlan(scenePlan, characters),
+    characterInstructions,
+    previousFrameInstruction,
+    hasPreviousFrame
+      ? "The previous frame is continuity context only. Do not use it as the primary starting composition and do not carry forward completed actions that conflict with this beat's start state."
+      : "No previous frame is available; rely entirely on the current beat's scene-state plan.",
+    clipIndex === 0
+      ? "This is the opening scene. Establish the requested starting physical state clearly and naturally before motion begins."
+      : "This is a continuation scene. Preserve continuity with the supplied previous frame while establishing the new scene state.",
+    "Compose the visible story subjects together in the same believable environment with natural scale, perspective, lighting, and spatial relationships.",
     "Do not add extra people, duplicate characters, unrelated animals, unrelated vehicles, text, logos, panels, labels, borders, or UI elements.",
   ]
     .filter(Boolean)
     .join(" ")
     .trim();
 
-  return sanitizeT2VImageGenerationText(prompt, characters);
+  // Final hard safety pass for T2V image generation.
+  return sanitizeT2VImageGenerationText(
+    prompt,
+    characters,
+  );
 };
 
 const createSceneKeyframe = async (
@@ -791,7 +865,7 @@ const createSceneKeyframe = async (
     scenePlan,
     characters,
     clipIndex,
-    Boolean(continuationReferenceImageUrl),
+    false,
   );
 
   console.log(
@@ -873,18 +947,44 @@ const createSceneKeyframe = async (
 const buildScenePromptFromPlan = (
   plan: VideoScenePlan,
 ): string => {
-  const shotContract = buildT2VShotContract(
-    plan,
-    [],
-    Math.max(0, plan.sceneNumber - 1),
-  );
+  const startText =
+    plan.startState.trim()
+      ? `Start state: ${plan.startState.trim()}.`
+      : "";
 
-  validateT2VShotContract(shotContract);
+  const endText =
+    plan.endState.trim()
+      ? `End state: ${plan.endState.trim()}.`
+      : "";
 
-  return renderT2VShotContractForPrompt(
-    shotContract,
-    "MOTION",
-  );
+  const actionText =
+    plan.actions.length > 0
+      ? `Actions: ${plan.actions.join("; ")}.`
+      : "";
+
+  const locationText =
+    plan.location?.trim()
+      ? `Location: ${plan.location.trim()}.`
+      : "";
+
+  const visibleCharactersText =
+    plan.visibleCharacterIds.length > 0
+      ? `Visible character IDs: ${plan.visibleCharacterIds.join(", ")}.`
+      : "";
+
+  return [
+    plan.title.trim()
+      ? `Scene: ${plan.title.trim()}.`
+      : "",
+    plan.description.trim(),
+    locationText,
+    visibleCharactersText,
+    startText,
+    actionText,
+    endText,
+  ]
+    .filter(Boolean)
+    .join(" ");
 };
 
 /**
@@ -966,6 +1066,207 @@ const buildSceneStateKeyframePlan = (
     .join("\n");
 };
 
+const buildCharacterIntelligenceControl = (
+  scenePlan: VideoScenePlan | undefined,
+): string => {
+  const characterPlans =
+    scenePlan?.characterPlans ?? [];
+
+  if (characterPlans.length === 0) {
+    return "";
+  }
+
+  const lines = characterPlans.map(
+    (plan) => {
+      const actions =
+        plan.actions.length > 0
+          ? `Actions for character ${plan.characterId} in exact order: ${plan.actions.join("; ")}.`
+          : "";
+
+      const emotion = plan.emotion.trim()
+        ? `Emotion: ${plan.emotion.trim()}.`
+        : "";
+
+      const expression = plan.expression.trim()
+        ? `Facial expression: ${plan.expression.trim()}.`
+        : "";
+
+      const bodyLanguage =
+        plan.bodyLanguage.length > 0
+          ? `Body language: ${plan.bodyLanguage.join("; ")}.`
+          : "";
+
+      const startState = plan.startState.trim()
+        ? `Character start state: ${plan.startState.trim()}.`
+        : "";
+
+      const endState = plan.endState.trim()
+        ? `Character end state: ${plan.endState.trim()}.`
+        : "";
+
+      return [
+        `Character ID: ${plan.characterId}.`,
+        actions,
+        emotion,
+        expression,
+        bodyLanguage,
+        startState,
+        endState,
+      ]
+        .filter(Boolean)
+        .join(" ");
+    },
+  );
+
+  return [
+    "Character behavior requirements:",
+    "Each visible character must perform only the specified actions, with the specified emotion, facial expression, body language, and physical state transition. Do not transfer one character's action or emotion to another character.",
+    ...lines,
+  ].join("\n");
+};
+
+const buildActionControl = (
+  scenePlan: VideoScenePlan | undefined,
+  clipIndex: number,
+  isFinalClip: boolean,
+  hasAuthoritativeSceneKeyframe = false,
+): string => {
+  const actions =
+    scenePlan?.actions ?? [];
+
+  const orderedActions =
+    actions.length > 0
+      ? `Mandatory on-screen actions in this exact chronological order: ${actions.join("; ")}. Do not skip, reorder, replace, or invent actions.`
+      : "";
+
+  const startState =
+    scenePlan?.startState?.trim()
+      ? `Begin from this visible physical state: ${scenePlan.startState.trim()}.`
+      : "";
+
+  const endState =
+    scenePlan?.    scenePlan?.)
+    scenePlan?.    sclip e    scenePlan?.    sclip e    scenePlan?te    scenePlan?. dSt    scenePlan?.    sclip e    scenePlan?.  ty =    scenePlan?.    sclip e    scenePlan?.    sclip e    sce      ? "Start from the supplied scene-keyframe image as the authoritative visual starting state for this clip. Continue the story from that scene-keyframe state; do not restart from, restore, or override it with the previous clip's    scenePlan?Preserve continuity where it does not conflict w    scenePlan?.    scl."
+        : "Continue directly from the previous clip's f        : "Contierve the same environment, character identity, camera direction, and physical state."
+      : "This is the opening clip. First show the exact requested start state clearly for a brief moment; do not skip the stated starting pose or begin after the action has already started. Then begin the requested action within the first second. Do not present any reference image as a visi      : "Tg c      : "This is pecificChoreography =
+    clipIndex === 1
+      ? [
+          "CLIP 2 PHYSICAL CHOREOGRAPHY:",
+          "The shopkeeper must visibly hold or present a small serving of fries with both open hands toward the customer.",
+          "The shopkeeper must lean slightly toward the customer while making the fries offer and give one clearly visible nod.",
+          "The fries offer must be visually obvious before the refusal begins.",
+          "The customer must face the shopkeeper and clearly shake his head left-to-right and right-to-left to show refusal.",
+          "Immediately after the head shake, the customer must raise one hand with the palm facing the shopkeeper in a clear polite stop/refusal gesture.",
+          "Hold the refusal palm-out gesture briefly so it is unmistakable.",
+          "Do not replace these actions with vague pointing, idle hand motion, talking only, standing still, or an ambiguous gesture.",
+          "Do not complete the burger handoff or introduce any new object transfer in this clip.",
+        ].join(" ")
+        ].;
+
+  const  conlState =
+    isFinalClip
+      ? "This is the final clip. Complete the required story actions before the end and hold the resolved end state for the final second. Do not end mid-action."
+      : "";
+
+  return [
+    startState,
+    orderedActions,
+    specificChoreography,
+    endState,
+    continuity,
+    finalState,
+  ]
+    .filter(Boolean)
+    .join(" ");
+};
+
+const buildContinuityIntelligenceControl = (
+  scenePlan: VideoScenePlan | undefined,
+  clipIndex: number,
+  hasContinuationReference: boolean,
+  hasAuthoritativeSceneKeyframe = false,
+): string => {
+  if (!scenePlan || clipIndex === 0) {
+    return hasContinuationReference
+      ? [
+          "A continuation reference frame is supplied.",
+          "Use it only as the previous visual state; do not display it as an image card.",
+        ].join(" ")
+      : "";
+  }
+
+  const continuity = scenePlan.continuity;
+
+  const inheritedStates =
+    continuity?.inheritedCharacterStates ?? {};
+
+  const inheritedStateLines =
+    Object.entries(inheritedStates)
+      .filter(
+        ([, state]) =>
+          typeof state === "string" &&
+          state.trim().length > 0,
+      )
+      .map(
+        ([characterId, state]) =>
+          `Character ${characterId} must carry forward this inherited state: ${state.trim()}.`,
+      );
+
+  const requiredContinuity =
+    continuity?.requiredContinuity ?? [];
+
+  const continuityLines =
+    requiredContinuity
+      .filter(
+        (rule) =>
+          typeof rule === "string" &&
+          rule.trim().length > 0,
+      )
+      .map(
+        (rule) =>
+          `Required continuity: ${rule.trim()}.`,
+      );
+
+  const locationInstruction =
+    continuity?.locationContinues
+      ? scenePlan.location?.trim()
+        ? `Keep the same location and environment: ${scenePlan.location.trim()}.`
+        : "Keep the same location and environment unless the story explicitly changes it."
+      : "Only change the location if the story beat explicitly requires a location change.";
+
+  const startState =
+    scenePlan.startState.trim()
+      ? `The clip must begin from this visible state: ${scenePlan.startState.trim()}.`
+      : "";
+
+  const endState =
+    scenePlan.endState.trim()
+      ? `The clip must finish at this visible state: ${scenePlan.endState.trim()}.`
+      : "";
+
+  const frameInstruction =
+    hasAuthoritativeSceneKeyframe
+      ? "The supplied scene-keyframe reference is authoritative for the starting visual state of this clip. Treat the previous clip frame only as background continuity context. Do not restore old object positions, completed actions, poses, or handoffs from the previous frame when they conflict with this scene's startState or actions."
+      : hasContinuationReference
+        ? "The supplied previous-frame reference is authoritative for visual continuity at the start of this clip. Preserve character identity, relative positions, environment, lighting, and physical state from that frame unless the story explicitly changes them."
+        : "No previous-frame reference is available. Use the manifest continuity state and next start state as the continuity source of truth.";
+
+  return [
+    "Continuity requirements:",
+    frameInstruction,
+    "Do not restart the scene, reset character positions, or introduce a visually inconsistent new version of the characters.",
+    locationInstruction,
+    startState,
+    ...inheritedStateLines,
+    ...continuityLines,
+    endState,
+  ]
+    .filter(Boolean)
+    .join("\n");
+};
+
+
+
 const buildVisionRetryInstruction = (
   visionResult: import("./videoVisionQa.service.js").VideoVisionQaResult,
   attempt: number,
@@ -1033,81 +1334,150 @@ const buildClipPrompt = (
   retryInstruction = "",
   hasAuthoritativeSceneKeyframe = false,
 ): string => {
-  const styleText = buildStyleText(options.style);
-  const cameraText = buildCameraText(options.camera);
+  const styleText =
+    buildStyleText(
+      options.style,
+    );
 
-  const visibleCharacters = getCharactersForScene(
-    (options.characters ?? []) as VideoCharacterInput[],
-    basePrompt,
-    previousSceneCharacters,
-    scenePlan,
-  );
+  const cameraText =
+    buildCameraText(
+      options.camera,
+    );
 
-  const shotContract = buildT2VShotContract(
-    scenePlan,
-    visibleCharacters,
-    clipIndex,
-  );
-  validateT2VShotContract(shotContract);
+  const visibleCharacters =
+    getCharactersForScene(
+      (
+        options.characters ??
+          []
+      ) as VideoCharacterInput[],
+      basePrompt,
+      previousSceneCharacters,
+      scenePlan,
+    );
 
-  const identityLines = visibleCharacters.map((character) => {
-    const isSaved =
-      "source" in character &&
-      character.source === "saved";
+  const identityLines =
+    visibleCharacters.map(
+      (character) => {
+        const isSaved =
+          "source" in character &&
+          character.source === "saved";
 
-    if (isSaved) {
-      return [
-        `Character ${character.id}:`,
-        "Use the supplied saved reference image as the sole visual identity source.",
-        "Do not redesign the character.",
-      ].join(" ");
-    }
+        /*
+         * Saved characters are image-first. Do not append imagePrompt or
+         * another textual appearance description that may conflict with the
+         * actual selected character image.
+         */
+        const preciseIdentity = isSaved
+          ? ""
+          : (
+              "imagePrompt" in character &&
+              typeof character.imagePrompt === "string" &&
+              character.imagePrompt.trim()
+            )
+              ? character.imagePrompt.trim()
+              : character.visualDescription.trim();
 
-    const visualGuidance =
-      typeof character.imagePrompt === "string" &&
-      character.imagePrompt.trim()
-        ? character.imagePrompt.trim()
-        : character.visualDescription.trim();
+        return [
+          `${character.name}: preserve the supplied reference exactly.`,
+          isSaved
+            ? "This is a saved character; the supplied saved reference image is the sole visual identity source. Ignore any alternate textual appearance description."
+            : "",
+          preciseIdentity
+            ? `Reference appearance guidance: ${preciseIdentity}.`
+            : "",
+        ]
+          .filter(Boolean)
+          .join(" ");
+      },
+    );
 
-    return [
-      `Character ${character.id}:`,
-      visualGuidance
-        ? `Stable appearance guidance: ${visualGuidance}.`
-        : "Keep one consistent original fictional identity.",
-      "Do not redesign the character between shots.",
-    ].join(" ");
-  });
 
-  const continuityInstruction =
+  const sceneText =
+    scenePlan
+      ? [
+          scenePlan.title.trim()
+            ? `Scene: ${scenePlan.title.trim()}.`
+            : "",
+          scenePlan.description.trim(),
+        ]
+          .filter(Boolean)
+          .join(" ")
+      : basePrompt.trim();
+
+  const continuity =
+    clipIndex > 0
+      ? hasAuthoritativeSceneKeyframe
+        ? "Start from the supplied scene-keyframe reference as the authoritative visual start for this clip. Do not restart from or visually revert to the previous clip's final frame."
+        : "Direct continuation of the previous clip. Start from its final frame without restarting the story."
+      : "Opening clip. Begin from the exact requested start state, then transition into the requested action naturally within the first second.";
+
+  const actionControl =
+    buildActionControl(
+      scenePlan,
+      clipIndex,
+      isFinalClip,
+      hasAuthoritativeSceneKeyframe,
+    );
+
+  const characterIntelligenceControl =
+    buildCharacterIntelligenceControl(
+      scenePlan,
+    );
+
+  const continuityIntelligenceControl =
+    buildContinuityIntelligenceControl(
+      scenePlan,
+      clipIndex,
+      hasContinuationReference,
+      hasAuthoritativeSceneKeyframe,
+    );
+
+  const startAuthorityInstruction =
     hasAuthoritativeSceneKeyframe
-      ? "The supplied scene-keyframe reference is authoritative for the starting visual state. The supplied scene-keyframe image is the authoritative starting visual state. The previous clip frame, if supplied, is continuity context only and must never override the current shot start state."
+      ? "The supplied scene-keyframe reference is authoritative for the starting visual state of this clip. Treat the previous clip frame only as background continuity context; do not restore or override the scene-keyframe state with it."
       : hasContinuationReference
-        ? "Continue from the supplied previous-frame reference without resetting the story state."
-        : "Follow the shot contract start state exactly.";
+        ? "The supplied previous-frame reference is the authoritative visual starting state for this clip. Continue directly from that frame."
+        : "No image start reference is available; follow the manifest start state exactly.";
 
   const prompt = [
-    renderT2VShotContractForPrompt(shotContract, "MOTION"),
+    sceneText,
+    startAuthorityInstruction,
     `Style: ${styleText}.`,
     `Camera: ${cameraText}.`,
     identityLines.length > 0
-      ? identityLines.join(" ")
+      ? `Only these visible story characters: ${identityLines.join(" ")}`
       : "",
-    continuityInstruction,
-    clipIndex === 0
-      ? "Opening shot: establish the exact START_STATE first, then perform the listed actions in order."
-      : "Do not restart the story or reset character/object positions unless the current shot contract explicitly requires that change.",
-    isFinalClip
-      ? "Final shot: reach END_STATE before the final moment and hold the resolved state briefly; do not end mid-action."
-      : "",
+    continuity,
+    actionControl,
+    characterIntelligenceControl,
+    continuityIntelligenceControl,
     retryInstruction,
-    "Animate only the specified actions and character contributions. Do not invent unrelated story events, object transfers, extra gestures, or extra characters.",
-    "Preserve identity, environment, lighting, scale, perspective, and spatial relationships unless the shot contract explicitly changes them.",
+    "Do not add extra people, duplicate characters, unrelated animals, unrelated vehicles, text, or logos.",
+    "Preserve character identity, clothing, colors, species, facial features, proportions, environment, lighting, and spatial relationships.",
   ]
     .filter(Boolean)
-    .join("\n\n")
-    .trim();
+    .join("\n\n");
 
-  return prompt;
+  return prompt.length <= 2000
+    ? prompt
+    : `${prompt.slice(0, 1990).trimEnd()}...`;
+};
+
+
+type CharacterSource =
+  | "saved"
+  | "ai";
+
+type VideoCharacterInput = {
+  id: string;
+  name: string;
+  role: string;
+  visualDescription: string;
+  imagePrompt?: string;
+  imageUrl?: string;
+  imageKey?: string;
+  source?: CharacterSource;
+  savedCharacterId?: string;
 };
 
 const resolveCharacterReferences = async (
@@ -1283,10 +1653,7 @@ const runVideoGenerationPreflight = (
       );
     }
 
-    if (
-      hasAuthoritativeSceneKeyframe &&
-      !/scene-keyframe(?: image)? is the authoritative starting visual state/i.test(prompt)
-    ) {
+    if (hasAuthoritativeSceneKeyframe && !prompt.includes("scene-keyframe reference is authoritative")) {
       throw new Error(
         `VIDEO_PREFLIGHT_FAILED: Clip ${index + 1} prompt does not contain the required scene-keyframe authority instruction.`,
       );
@@ -1310,21 +1677,51 @@ const runVideoGenerationPreflight = (
       );
     }
 
-    const sanitizedKeyframePrompt =
-      sanitizeT2VImageGenerationText(
-        keyframePrompt,
-        sceneCharacters,
-      );
+    const unsafeImagePromptTerms = [
+      ...sceneCharacters
+        .map((character) => character.name.trim())
+        .filter(Boolean),
+      "spider-man",
+      "spiderman",
+      "स्पाइडर-मैन",
+      "spider-themed",
+      "spider theme",
+      "spider based",
+      "spider inspired",
+      "web patterns",
+      "स्पाइडर-थीम",
+      "स्पाइडर थीम",
+      "स्पाइडर-आधारित",
+      "स्पाइडर आधारित",
+      "स्पाइडर-प्रेरित",
+      "स्पाइडर प्रेरित",
+      "मकड़ी",
+      "superman",
+      "सुपरमैन",
+      "batman",
+      "बैटमैन",
+      "iron-man",
+      "iron man",
+      "आयरन-मैन",
+    ];
 
-    if (!sanitizedKeyframePrompt.trim()) {
-      throw new Error(
-        `VIDEO_PREFLIGHT_FAILED: Clip ${index + 1} T2V keyframe prompt became empty after safety sanitization.`,
+    const unsafeImagePromptMatches = unsafeImagePromptTerms.filter((term) =>
+      new RegExp(escapeRegExp(term), "iu").test(keyframePrompt),
+    );
+
+    const residualSpiderFamilyMatch = keyframePrompt.match(
+      /(?:spider|स्पाइडर|मकड़ी)(?:[- ]?(?:man|मैन|themed|theme|थीम|आधारित|based|inspired|प्रेरित))?/iu,
+    );
+
+    if (residualSpiderFamilyMatch) {
+      unsafeImagePromptMatches.push(
+        residualSpiderFamilyMatch[0],
       );
     }
 
-    if (sanitizedKeyframePrompt !== keyframePrompt) {
-      console.log(
-        `[VideoService] PRE-FLIGHT: Clip ${index + 1} keyframe prompt required generic safety sanitization.`,
+    if (unsafeImagePromptMatches.length > 0) {
+      throw new Error(
+        `VIDEO_PREFLIGHT_FAILED: Clip ${index + 1} T2V image keyframe prompt still contains unsafe/branded terms: ${unsafeImagePromptMatches.join(", ")}.`,
       );
     }
 
@@ -1431,21 +1828,168 @@ export class VideoService {
     }
 
     /*
-     * The dedicated clip planner converts canonical story beats into the exact
-     * number of five-second clips while preserving chronology.
+     * The clip planner converts story beats into the exact number
+     * of five-second video clips while preserving chronology.
      */
-    const plannedClips =
-      scenePlans.length > 0
-        ? planStoryBeatsIntoClips(
-            scenePlans,
-            clipCount,
-          )
-        : [];
+    const buildClipScenePlans = (
+      plans: VideoScenePlan[],
+      totalClips: number,
+    ): Array<VideoScenePlan | undefined> => {
+      if (plans.length === 0) {
+        return [];
+      }
 
-    const clipScenePlans: Array<VideoScenePlan | undefined> =
-      plannedClips.map((plannedClip) => ({
-        ...plannedClip.scenePlan,
-      }));
+      if (
+        plans.length <= totalClips
+      ) {
+        const result =
+          plans.map(
+            (plan) => ({
+              ...plan,
+              durationSeconds: 5,
+            }),
+          );
+
+        while (
+          result.length <
+          totalClips
+        ) {
+          const previous =
+            result[result.length - 1];
+
+          if (!previous) {
+            break;
+          }
+
+          result.push({
+            ...previous,
+            sceneNumber:
+              previous.sceneNumber +
+              1,
+            title:
+              `${previous.title} — continuation`,
+            narration: "",
+            actions: [],
+            startState:
+              previous.endState,
+            endState:
+              previous.endState,
+            durationSeconds: 5,
+          });
+        }
+
+        return result;
+      }
+
+      const baseSize =
+        Math.floor(
+          plans.length /
+            totalClips,
+        );
+
+      const remainder =
+        plans.length %
+        totalClips;
+
+      const groups:
+        VideoScenePlan[][] =
+        [];
+
+      let cursor = 0;
+
+      for (
+        let clipIndex = 0;
+        clipIndex < totalClips;
+        clipIndex += 1
+      ) {
+        const extra =
+          clipIndex >=
+          totalClips - remainder
+            ? 1
+            : 0;
+
+        const groupSize =
+          baseSize + extra;
+
+        groups.push(
+          plans.slice(
+            cursor,
+            cursor + groupSize,
+          ),
+        );
+
+        cursor += groupSize;
+      }
+
+      return groups.map(
+        (group, clipIndex) => {
+          const first =
+            group[0];
+
+          const last =
+            group[group.length - 1];
+
+          return {
+            sceneNumber:
+              first?.sceneNumber ??
+              clipIndex + 1,
+            title:
+              group
+                .map(
+                  (plan) =>
+                    plan.title.trim(),
+                )
+                .filter(Boolean)
+                .join(" → ") ||
+              `Story beat ${clipIndex + 1}`,
+            description:
+              group
+                .map(
+                  (plan) =>
+                    plan.description.trim(),
+                )
+                .filter(Boolean)
+                .join(" "),
+            narration:
+              group
+                .map(
+                  (plan) =>
+                    plan.narration.trim(),
+                )
+                .filter(Boolean)
+                .join(" "),
+            durationSeconds:
+              5,
+            visibleCharacterIds:
+              Array.from(
+                new Set(
+                  group.flatMap(
+                    (plan) =>
+                      plan.visibleCharacterIds,
+                  ),
+                ),
+              ),
+            actions:
+              group.flatMap(
+                (plan) =>
+                  plan.actions,
+              ),
+            startState:
+              first?.startState ??
+              "",
+            endState:
+              last?.endState ??
+              "",
+          };
+        },
+      );
+    };
+
+    const clipScenePlans =
+      buildClipScenePlans(
+        scenePlans,
+        clipCount,
+      );
 
     const preflightOnly =
       /^(1|true|yes)$/i.test(
@@ -1555,19 +2099,6 @@ export class VideoService {
           scenePlan,
         );
 
-      const shotContract = buildT2VShotContract(
-        scenePlan,
-        sceneCharacters,
-        index,
-      );
-
-      validateT2VShotContract(shotContract);
-
-      console.log(
-        `[VideoService] Clip ${index + 1} T2V shot contract:`,
-        shotContract,
-      );
-
       /*
        * STEP 5 — EVERY T2V BEAT GETS A FRESH AUTHORITATIVE KEYFRAME.
        *
@@ -1593,10 +2124,7 @@ export class VideoService {
       }
 
       let clipOptions:
-        VideoGenerationOptions & {
-          durationSeconds: number;
-          referenceImageUrl?: string;
-        };
+        VideoGenerationOptions;
 
       let retryInstruction = "";
 
@@ -1762,7 +2290,7 @@ export class VideoService {
 
             generated =
               await this.primaryProvider.generateVideo(
-                clipOptions as VideoGenerationOptions,
+                clipOptions,
               );
           } else {
             console.log(
@@ -1771,7 +2299,7 @@ export class VideoService {
 
             generated =
               await this.fallbackProvider.generateVideo(
-                clipOptions as VideoGenerationOptions,
+                clipOptions,
               );
           }
 

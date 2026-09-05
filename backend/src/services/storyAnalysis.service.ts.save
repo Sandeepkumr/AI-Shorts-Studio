@@ -1,0 +1,31 @@
+import { OpenAIStoryAnalysisProvider } from "../providers/story/openaiStoryAnalysisProvider.js";
+import type {
+  StoryAnalysisProvider,
+  StoryAnalysisResult,
+} from "../providers/story/storyAnalysisProvider.js";
+
+export class StoryAnalysisService {
+  constructor(
+    private readonly provider: StoryAnalysisProvider =
+      new GeminiStoryAnalysisProvider(),
+  ) {}
+
+  async analyzeStory(
+    story?: string,
+  ): Promise<StoryAnalysisResult> {
+    const sourceStory = story?.trim();
+
+    if (!sourceStory) {
+      throw new Error("Story is required.");
+    }
+
+    return this.provider.analyzeStory(sourceStory);
+  }
+}
+
+export const createStoryAnalysisService = (
+  provider?: StoryAnalysisProvider,
+) => new StoryAnalysisService(provider);
+
+export const storyAnalysisService =
+  createStoryAnalysisService();

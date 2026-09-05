@@ -1,5 +1,7 @@
 import React, { useCallback, useState } from 'react';
 import {
+  ActivityIndicator,
+  Alert,
   Image,
   KeyboardAvoidingView,
   Modal,
@@ -10,12 +12,11 @@ import {
   StatusBar,
   StyleSheet,
   Text,
-  TextInput,
   View,
   useWindowDimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 
 const COLORS = {
@@ -53,11 +54,12 @@ const ASSETS = {
   styleAnime: require('../assets/style-anime.png'),
   styleCartoon: require('../assets/style-cartoon.png'),
 
-  vamika: require('../assets/vamika-character.png'),
-  shopkeeper: require('../assets/shopkeeper-character.png'),
 
-  magic: require('../assets/magic-feather.png'),
 } as const;
+
+
+const API_BASE_URL =
+  'http://192.168.31.189:4000';
 
 type StyleId =
   | '3d'
@@ -86,6 +88,44 @@ type Language =
   | 'German'
   | 'Japanese'
   | 'Korean';
+
+type CustomizationState = {
+  duration?: Duration;
+  ratio?: Ratio;
+  style?: StyleId;
+  language?: Language;
+  voice?: Voice;
+  camera?: Camera;
+};
+
+const parseCustomizationState = (
+  value: string | string[] | undefined,
+): CustomizationState => {
+  if (typeof value !== "string" || !value.trim()) {
+    return {};
+  }
+
+  try {
+    const parsed = JSON.parse(value) as CustomizationState;
+
+    if (
+      !parsed ||
+      typeof parsed !== "object" ||
+      Array.isArray(parsed)
+    ) {
+      return {};
+    }
+
+    return parsed;
+  } catch (error) {
+    console.error(
+      "Customize Story customization parse error:",
+      error,
+    );
+    return {};
+  }
+};
+
 
 const LANGUAGE_OPTIONS: Array<{
   label: Language;
@@ -134,39 +174,63 @@ const STYLE_OPTIONS: Array<{
   },
 ];
 
-const DEFAULT_APPEARANCE =
-  'Alex has red hair, fair skin, blue hoodie and white sneakers. The shopkeeper has black hair, beard and wears a black apron.';
-
 export default function CustomizeVideoScreen() {
   const router = useRouter();
   const { width } = useWindowDimensions();
+  const {
+    analysis,
+    story,
+    customization,
+  } = useLocalSearchParams<{
+    analysis?: string;
+    story?: string;
+    customization?: string;
+  }>();
+
+  const parsedCustomization =
+    parseCustomizationState(
+      customization,
+    );
 
   const scale = Math.min(width / 428, 1);
   const horizontalPadding = width <= 375 ? 16 : 22;
 
-  const [duration, setDuration] = useState<Duration>(30);
-  const [ratio, setRatio] = useState<Ratio>('9:16');
-  const [style, setStyle] = useState<StyleId>('3d');
+  const [duration, setDuration] =
+    useState<Duration>(
+      parsedCustomization.duration ?? 30,
+    );
+  const [ratio, setRatio] =
+    useState<Ratio>(
+      parsedCustomization.ratio ?? '9:16',
+    );
+  const [style, setStyle] =
+    useState<StyleId>(
+      parsedCustomization.style ?? '3d',
+    );
   const [language, setLanguage] =
-    useState<Language>('English (US)');
-  const [voice, setVoice] = useState<Voice>('auto');
-  const [camera, setCamera] = useState<Camera>('auto');
-  const [appearance, setAppearance] =
-    useState(DEFAULT_APPEARANCE);
-
-  const [showSaveCharactersModal, setShowSaveCharactersModal] =
-    useState(false);
+    useState<Language>(
+      parsedCustomization.language ??
+        'English (US)',
+    );
+  const [voice, setVoice] =
+    useState<Voice>(
+      parsedCustomization.voice ?? 'auto',
+    );
+  const [camera, setCamera] =
+    useState<Camera>(
+      parsedCustomization.camera ?? 'auto',
+    );
 
   const [showLanguageDropdown, setShowLanguageDropdown] =
     useState(false);
 
-  const [saveAlex, setSaveAlex] = useState(true);
-  const [saveShopkeeper, setSaveShopkeeper] = useState(true);
+  const [isOptimizing, setIsOptimizing] =
+    useState(false);
 
-  const [characterNames, setCharacterNames] = useState({
-    '1': 'Alex',
-    '2': 'Shopkeeper',
-  });
+  console.log(
+    '[CUSTOMIZE STORY] restored settings:',
+    parsedCustomization,
+  );
 
   const goBack = useCallback(() => {
     if (router.canGoBack()) {
@@ -176,27 +240,210 @@ export default function CustomizeVideoScreen() {
     }
   }, [router]);
 
-  const handleContinue = useCallback(() => {
-    setShowSaveCharactersModal(true);
-  }, []);
+  const handleContinue = useCallback(async () => {
+    if (isOptimizing) {
+      return;
+    }
 
-  const continueWithoutSaving = useCallback(() => {
-    setShowSaveCharactersModal(false);
-    router.push('/ai-preview');
-  }, [router]);
+    const cleanStory =
+      typeof story === 'string'
+        ? story.trim()
+        : '';
 
-  const saveCharactersAndContinue = useCallback(() => {
-    // The selected character names are already kept in local state.
-    // This is the integration point for the real character-library API.
-    setShowSaveCharactersModal(false);
-    router.push('/ai-preview');
-  }, [router]);
+    if (!cleanStory) {
+      Alert.alert(
+        'Story Missing',
+        'Your story could not be found. Please go back and enter your story again.',
+      );
+      return;
+    }
 
-  const appendMagicSuggestion = useCallback(() => {
-    setAppearance(
-      'Alex has red hair, fair skin, blue hoodie and white sneakers. The shopkeeper has black hair, beard and wears a black apron.',
+    if (
+      typeof analysis !== 'string' ||
+      !analysis.trim()
+    ) {
+      Alert.alert(
+        'Story Analysis Missing',
+        'The AI story analysis could not be found. Please go back and analyze your story again.',
+      );
+      return;
+    }
+
+    let parsedAnalysis: unknown;
+
+    try {
+      parsedAnalysis =
+        JSON.parse(analysis);
+    } catch (error) {
+      console.error(
+        '[CUSTOMIZE STORY] Analysis JSON parse error:',
+        error,
+      );
+
+      Alert.alert(
+        'Analysis Error',
+        'The current story analysis is invalid. Please go back and analyze your story again.',
+      );
+      return;
+    }
+
+    if (
+      !parsedAnalysis ||
+      typeof parsedAnalysis !== 'object' ||
+      Array.isArray(parsedAnalysis)
+    ) {
+      Alert.alert(
+        'Analysis Error',
+        'The current story analysis is invalid. Please go back and analyze your story again.',
+      );
+      return;
+    }
+
+    const customizationPayload = {
+      duration,
+      ratio,
+      style,
+      language,
+      voice,
+      camera,
+    };
+
+    const optimizeRequestBody = {
+      story: cleanStory,
+      analysis: parsedAnalysis,
+      requestedDurationSeconds: duration,
+      language,
+    };
+
+    console.log(
+      '[CUSTOMIZE STORY] sending customization:',
+      customizationPayload,
     );
-  }, []);
+
+    console.log(
+      '[CUSTOMIZE STORY] optimizing storyboard:',
+      optimizeRequestBody,
+    );
+
+    setIsOptimizing(true);
+
+    try {
+      const response =
+        await fetch(
+          `${API_BASE_URL}/story/optimize`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type':
+                'application/json',
+            },
+            body: JSON.stringify(
+              optimizeRequestBody,
+            ),
+          },
+        );
+
+      const data =
+        (await response.json()) as {
+          success?: boolean;
+          version?: number;
+          title?: string;
+          summary?: string;
+          requestedDurationSeconds?:
+            | 15
+            | 30
+            | 60;
+          characters?: unknown[];
+          storyBeats?: unknown[];
+          scenes?: unknown[];
+          error?: string;
+        };
+
+      console.log(
+        '[CUSTOMIZE STORY] optimizer response:',
+        data,
+      );
+
+      if (
+        !response.ok ||
+        !data.success ||
+        !Array.isArray(data.storyBeats) ||
+        data.storyBeats.length === 0
+      ) {
+        throw new Error(
+          data.error ||
+            'Unable to optimize the storyboard.',
+        );
+      }
+
+      const optimizedAnalysis = {
+        version: 1 as const,
+        title:
+          data.title ||
+          'Untitled Story',
+        summary:
+          data.summary ||
+          cleanStory,
+        requestedDurationSeconds:
+          duration,
+        characters:
+          Array.isArray(data.characters)
+            ? data.characters
+            : [],
+        storyBeats:
+          data.storyBeats,
+      };
+
+      console.log(
+        '[CUSTOMIZE STORY] optimized storyboard:',
+        optimizedAnalysis,
+      );
+
+      router.replace({
+        pathname: '/ai-preview',
+        params: {
+          story: cleanStory,
+          analysis:
+            JSON.stringify(
+              optimizedAnalysis,
+            ),
+          config:
+            JSON.stringify(
+              customizationPayload,
+            ),
+          customization:
+            JSON.stringify(
+              customizationPayload,
+            ),
+        },
+      });
+    } catch (error) {
+      console.error(
+        '[CUSTOMIZE STORY] storyboard optimization error:',
+        error,
+      );
+
+      Alert.alert(
+        'Unable to Prepare Storyboard',
+        error instanceof Error
+          ? error.message
+          : 'Something went wrong while preparing your storyboard. Please try again.',
+      );
+    } finally {
+      setIsOptimizing(false);
+    }
+  }, [
+    analysis,
+    camera,
+    duration,
+    isOptimizing,
+    language,
+    ratio,
+    router,
+    story,
+    style,
+    voice,
+  ]);
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -521,149 +768,6 @@ export default function CustomizeVideoScreen() {
           </SectionCard>
 
           {/* ====================================================
-              CHARACTERS
-          ==================================================== */}
-
-          <SectionCard>
-            <View style={styles.sectionTopRow}>
-              <SectionHeading title="Characters in Your Story" compact />
-
-              <View style={styles.detectedRow}>
-                <Ionicons
-                  name="people-outline"
-                  size={16}
-                  color={COLORS.cyan}
-                />
-                <Text style={styles.detectedText}>2</Text>
-                <Text style={styles.detectedText}>
-                  characters detected
-                </Text>
-              </View>
-            </View>
-
-            <CharacterRow
-              image={ASSETS.vamika}
-              characterNumber="1"
-              name={characterNames['1']}
-              onNameChange={(name) =>
-                setCharacterNames((current) => ({
-                  ...current,
-                  '1': name,
-                }))
-              }
-            />
-
-            <CharacterRow
-              image={ASSETS.shopkeeper}
-              characterNumber="2"
-              name={characterNames['2']}
-              onNameChange={(name) =>
-                setCharacterNames((current) => ({
-                  ...current,
-                  '2': name,
-                }))
-              }
-            />
-
-            <Pressable
-              onPress={() =>
-                router.push({
-                  pathname: '/characters' as any,
-                  params: { mode: 'select' },
-                })
-              }
-              style={({ pressed }) => [
-                styles.savedCharacterButton,
-                pressed && styles.pressed,
-              ]}
-            >
-              <View style={styles.savedCharacterIcon}>
-                <Ionicons
-                  name="person-outline"
-                  size={25}
-                  color={COLORS.cyan}
-                />
-              </View>
-
-              <View style={styles.savedCharacterCopy}>
-                <Text style={styles.savedCharacterTitle}>
-                  Use Saved Character
-                </Text>
-
-                <Text style={styles.savedCharacterSubtitle}>
-                  Choose from your character library
-                </Text>
-              </View>
-
-              <Ionicons
-                name="chevron-forward"
-                size={20}
-                color={COLORS.white}
-              />
-            </Pressable>
-          </SectionCard>
-
-          {/* ====================================================
-              CHARACTER APPEARANCE
-          ==================================================== */}
-
-          <SectionCard>
-            <View style={styles.sectionHeadingWithOptional}>
-              <Text style={styles.sectionTitle}>
-                Character Appearance
-              </Text>
-
-              <Text style={styles.optionalText}>
-                (Optional)
-              </Text>
-
-              <Text style={styles.headingSpark}>✦</Text>
-            </View>
-
-            <Text style={styles.helperDescription}>
-              Describe how your characters should look.
-            </Text>
-
-            <Text style={styles.helperDescription}>
-              You can include details like hair color, skin tone,
-              clothing, accessories, etc.
-            </Text>
-
-            <View style={styles.appearanceInputWrap}>
-              <TextInput
-                value={appearance}
-                onChangeText={setAppearance}
-                multiline
-                maxLength={1000}
-                textAlignVertical="top"
-                placeholder="Describe your characters..."
-                placeholderTextColor={COLORS.textMuted}
-                style={styles.appearanceInput}
-              />
-
-              <Pressable
-                onPress={appendMagicSuggestion}
-                style={({ pressed }) => [
-                  styles.magicButton,
-                  pressed && styles.pressed,
-                ]}
-                accessibilityRole="button"
-                accessibilityLabel="Generate appearance suggestion"
-              >
-                <Image
-                  source={ASSETS.magic}
-                  resizeMode="contain"
-                  style={styles.magicIcon}
-                />
-              </Pressable>
-
-              <Text style={styles.characterCount}>
-                {appearance.length}/1000
-              </Text>
-            </View>
-          </SectionCard>
-
-          {/* ====================================================
               VOICE
           ==================================================== */}
 
@@ -770,9 +874,14 @@ export default function CustomizeVideoScreen() {
 
         <View style={styles.fixedBottom}>
           <Pressable
-            onPress={handleContinue}
+            onPress={() => {
+              void handleContinue();
+            }}
+            disabled={isOptimizing}
             style={({ pressed }) => [
               styles.continueButton,
+              isOptimizing &&
+                styles.continueDisabled,
               pressed && styles.continuePressed,
             ]}
             accessibilityRole="button"
@@ -784,15 +893,30 @@ export default function CustomizeVideoScreen() {
               end={{ x: 1, y: 0.5 }}
               style={styles.continueGradient}
             >
-              <Text style={styles.continueText}>
-                Continue
-              </Text>
+              {isOptimizing ? (
+                <>
+                  <ActivityIndicator
+                    size="small"
+                    color={COLORS.white}
+                  />
 
-              <Ionicons
-                name="arrow-forward"
-                size={29}
-                color={COLORS.white}
-              />
+                  <Text style={styles.continueText}>
+                    Preparing Story...
+                  </Text>
+                </>
+              ) : (
+                <>
+                  <Text style={styles.continueText}>
+                    Continue
+                  </Text>
+
+                  <Ionicons
+                    name="arrow-forward"
+                    size={29}
+                    color={COLORS.white}
+                  />
+                </>
+              )}
             </LinearGradient>
           </Pressable>
         </View>
@@ -908,148 +1032,7 @@ export default function CustomizeVideoScreen() {
           </View>
         </Modal>
 
-        <Modal
-          visible={showSaveCharactersModal}
-          transparent
-          animationType="fade"
-          statusBarTranslucent
-          onRequestClose={() => setShowSaveCharactersModal(false)}
-        >
-          <View style={styles.modalOverlay}>
-            <Pressable
-              style={StyleSheet.absoluteFill}
-              onPress={() => setShowSaveCharactersModal(false)}
-              accessibilityLabel="Close save characters modal"
-            />
 
-            <View style={styles.saveModal}>
-              <Pressable
-                onPress={() => setShowSaveCharactersModal(false)}
-                hitSlop={10}
-                style={({ pressed }) => [
-                  styles.modalCloseButton,
-                  pressed && styles.pressed,
-                ]}
-                accessibilityRole="button"
-                accessibilityLabel="Close"
-              >
-                <Ionicons
-                  name="close"
-                  size={24}
-                  color={COLORS.textSecondary}
-                />
-              </Pressable>
-
-              <View style={styles.modalBookmarkGlow}>
-                <View style={styles.modalBookmarkCircle}>
-                  <Ionicons
-                    name="bookmark"
-                    size={25}
-                    color={COLORS.purple}
-                  />
-                </View>
-
-                <Text style={styles.modalSparkLeft}>✦</Text>
-                <Text style={styles.modalSparkRight}>✦</Text>
-                <Text style={styles.modalSparkTop}>✦</Text>
-              </View>
-
-              <Text style={styles.modalTitle}>
-                Save Characters?
-              </Text>
-
-              <Text style={styles.modalDescription}>
-                These new characters are ready.
-                {'\n'}
-                Save them to your library so you can use them again
-                {'\n'}
-                in future videos.
-              </Text>
-
-              <SaveCharacterRow
-                image={ASSETS.vamika}
-                name={characterNames['1']}
-                description="Red hair, fair skin, blue hoodie and white sneakers."
-                selected={saveAlex}
-                onToggle={() => setSaveAlex((value) => !value)}
-              />
-
-              <SaveCharacterRow
-                image={ASSETS.shopkeeper}
-                name={characterNames['2']}
-                description="Black hair, beard and wears a black apron."
-                selected={saveShopkeeper}
-                onToggle={() =>
-                  setSaveShopkeeper((value) => !value)
-                }
-              />
-
-              <View style={styles.modalInfoBar}>
-                <Ionicons
-                  name="shield-checkmark-outline"
-                  size={23}
-                  color={COLORS.cyan}
-                />
-
-                <Text style={styles.modalInfoText}>
-                  Saved characters will maintain their look across all your
-                  videos.
-                </Text>
-              </View>
-
-              <View style={styles.modalActions}>
-                <Pressable
-                  onPress={continueWithoutSaving}
-                  style={({ pressed }) => [
-                    styles.dontSaveButton,
-                    pressed && styles.pressed,
-                  ]}
-                >
-                  <Text style={styles.dontSaveText}>
-                    Don’t Save
-                  </Text>
-                </Pressable>
-
-                <Pressable
-                  onPress={saveCharactersAndContinue}
-                  style={({ pressed }) => [
-                    styles.saveContinueButton,
-                    pressed && styles.pressed,
-                  ]}
-                >
-                  <LinearGradient
-                    colors={['#00CFFF', '#2C75FF', '#8C2EFF']}
-                    start={{ x: 0, y: 0.5 }}
-                    end={{ x: 1, y: 0.5 }}
-                    style={styles.saveContinueGradient}
-                  >
-                    <Text style={styles.saveContinueSpark}>✦</Text>
-
-                    <Text style={styles.saveContinueText}>
-                      Save & Continue
-                    </Text>
-
-                    <Text style={styles.saveContinueSpark}>✦</Text>
-                  </LinearGradient>
-                </Pressable>
-              </View>
-
-              <View style={styles.modalFooter}>
-                <Ionicons
-                  name="lock-closed-outline"
-                  size={14}
-                  color={COLORS.textMuted}
-                />
-
-                <Text style={styles.modalFooterText}>
-                  You can manage your saved characters in
-                  {'\n'}
-                  My Characters anytime.
-                </Text>
-              </View>
-            </View>
-          </View>
-        </Modal>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -1160,171 +1143,6 @@ function RatioButton({
     </Pressable>
   );
 }
-
-function CharacterRow({
-  image,
-  characterNumber,
-  name,
-  onNameChange,
-}: {
-  image: any;
-  characterNumber: string;
-  name: string;
-  onNameChange: (name: string) => void;
-}) {
-  const [editing, setEditing] = useState(false);
-  const [draftName, setDraftName] = useState(name);
-
-  const startEditing = () => {
-    setDraftName(name);
-    setEditing(true);
-  };
-
-  const saveName = () => {
-    const trimmed = draftName.trim();
-
-    if (trimmed.length > 0) {
-      onNameChange(trimmed);
-      setDraftName(trimmed);
-    } else {
-      setDraftName(name);
-    }
-
-    setEditing(false);
-  };
-
-  return (
-    <View style={styles.characterRow}>
-      <Image
-        source={image}
-        resizeMode="cover"
-        style={styles.characterThumb}
-      />
-
-      <View style={styles.characterRowCopy}>
-        <Text style={styles.characterRowNumber}>
-          Character {characterNumber}
-        </Text>
-
-        {editing ? (
-          <TextInput
-            value={draftName}
-            onChangeText={setDraftName}
-            autoFocus
-            returnKeyType="done"
-            onSubmitEditing={saveName}
-            onBlur={saveName}
-            selectTextOnFocus
-            maxLength={40}
-            style={styles.characterNameInput}
-            placeholder="Enter character name"
-            placeholderTextColor={COLORS.textMuted}
-          />
-        ) : (
-          <Text
-            style={styles.characterRowName}
-            numberOfLines={1}
-          >
-            {name}
-          </Text>
-        )}
-      </View>
-
-      <Pressable
-        onPress={editing ? saveName : startEditing}
-        style={({ pressed }) => [
-          styles.characterEditButton,
-          pressed && styles.pressed,
-        ]}
-        hitSlop={8}
-        accessibilityRole="button"
-        accessibilityLabel={
-          editing
-            ? `Save character ${characterNumber} name`
-            : `Edit character ${characterNumber} name`
-        }
-      >
-        <Ionicons
-          name={editing ? 'checkmark-outline' : 'pencil-outline'}
-          size={20}
-          color={COLORS.cyan}
-        />
-      </Pressable>
-    </View>
-  );
-}
-
-function SaveCharacterRow({
-  image,
-  name,
-  description,
-  selected,
-  onToggle,
-}: {
-  image: any;
-  name: string;
-  description: string;
-  selected: boolean;
-  onToggle: () => void;
-}) {
-  return (
-    <View style={styles.modalCharacterRow}>
-      <View style={styles.modalCharacterImageWrap}>
-        <Image
-          source={image}
-          resizeMode="cover"
-          style={styles.modalCharacterImage}
-        />
-      </View>
-
-      <View style={styles.modalCharacterCopy}>
-        <Text
-          style={styles.modalCharacterName}
-          numberOfLines={1}
-        >
-          {name}
-        </Text>
-
-        <View style={styles.modalNewBadge}>
-          <Text style={styles.modalNewBadgeText}>
-            New Character
-          </Text>
-        </View>
-
-        <Text
-          style={styles.modalCharacterDescription}
-          numberOfLines={2}
-        >
-          {description}
-        </Text>
-      </View>
-
-      <Pressable
-        onPress={onToggle}
-        style={({ pressed }) => [
-          styles.modalCheckButton,
-          selected
-            ? styles.modalCheckButtonSelected
-            : styles.modalCheckButtonUnselected,
-          pressed && styles.pressed,
-        ]}
-        hitSlop={6}
-        accessibilityRole="checkbox"
-        accessibilityState={{ checked: selected }}
-        accessibilityLabel={`Save ${name}`}
-      >
-        {selected && (
-          <Ionicons
-            name="checkmark"
-            size={27}
-            color={COLORS.black}
-          />
-        )}
-      </Pressable>
-    </View>
-  );
-}
-
 
 function VoiceButton({
   icon,
@@ -2030,175 +1848,6 @@ const styles = StyleSheet.create({
   },
 
   /* ============================================================
-     CHARACTERS
-  ============================================================ */
-
-  detectedRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-
-  detectedText: {
-    color: COLORS.textMuted,
-    fontSize: 9.5,
-  },
-
-  characterRow: {
-    minHeight: 48,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    backgroundColor: COLORS.cardSoft,
-    borderRadius: 10,
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 7,
-    marginTop: 7,
-  },
-
-  characterThumb: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: '#0A1820',
-  },
-
-  characterRowCopy: {
-    flex: 1,
-    minWidth: 0,
-    marginLeft: 8,
-  },
-
-  characterRowNumber: {
-    color: COLORS.textSecondary,
-    fontSize: 9.5,
-    lineHeight: 12,
-  },
-
-  characterRowName: {
-    color: COLORS.white,
-    fontSize: 12,
-    lineHeight: 15,
-    fontWeight: '500',
-    marginTop: 1,
-  },
-
-  characterNameInput: {
-    color: COLORS.white,
-    fontSize: 12,
-    lineHeight: 16,
-    fontWeight: '500',
-    marginTop: 1,
-    paddingVertical: 0,
-    paddingHorizontal: 0,
-    minHeight: 20,
-  },
-
-  characterEditButton: {
-    width: 38,
-    height: 38,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  savedCharacterButton: {
-    minHeight: 49,
-    borderWidth: 1,
-    borderColor: COLORS.borderBright,
-    borderStyle: 'dashed',
-    borderRadius: 10,
-    backgroundColor: '#03131B',
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 10,
-    marginTop: 7,
-  },
-
-  savedCharacterIcon: {
-    width: 36,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  savedCharacterCopy: {
-    flex: 1,
-    minWidth: 0,
-    marginLeft: 5,
-  },
-
-  savedCharacterTitle: {
-    color: COLORS.cyan,
-    fontSize: 11.5,
-    lineHeight: 15,
-    fontWeight: '600',
-  },
-
-  savedCharacterSubtitle: {
-    color: COLORS.textSecondary,
-    fontSize: 9.5,
-    lineHeight: 13,
-    marginTop: 2,
-  },
-
-  /* ============================================================
-     APPEARANCE
-  ============================================================ */
-
-  helperDescription: {
-    color: COLORS.textSecondary,
-    fontSize: 10.5,
-    lineHeight: 16,
-    marginTop: 5,
-  },
-
-  appearanceInputWrap: {
-    minHeight: 120,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    backgroundColor: '#03131B',
-    borderRadius: 9,
-    marginTop: 8,
-    overflow: 'hidden',
-    position: 'relative',
-  },
-
-  appearanceInput: {
-    minHeight: 118,
-    paddingHorizontal: 12,
-    paddingTop: 10,
-    paddingBottom: 28,
-    paddingRight: 58,
-    color: COLORS.textSecondary,
-    fontSize: 11.5,
-    lineHeight: 18,
-  },
-
-  magicButton: {
-    position: 'absolute',
-    right: 9,
-    bottom: 8,
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#201342',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  magicIcon: {
-    width: 30,
-    height: 30,
-  },
-
-  characterCount: {
-    position: 'absolute',
-    left: 11,
-    bottom: 8,
-    color: COLORS.cyan,
-    fontSize: 9,
-  },
-
-  /* ============================================================
      VOICE
   ============================================================ */
 
@@ -2292,299 +1941,38 @@ const styles = StyleSheet.create({
     color: COLORS.white,
   },
 
-  /* ============================================================
-     SAVE CHARACTERS MODAL
-  ============================================================ */
 
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.76)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 16,
-  },
 
-  saveModal: {
-    width: '100%',
-    maxWidth: 620,
-    maxHeight: '89%',
-    borderRadius: 26,
-    borderWidth: 1.4,
-    borderColor: '#293A8A',
-    backgroundColor: '#020B16',
-    paddingHorizontal: 20,
-    paddingTop: 22,
-    paddingBottom: 18,
-    alignItems: 'stretch',
-    shadowColor: '#6A2CFF',
-    shadowOpacity: 0.28,
-    shadowRadius: 32,
-    elevation: 20,
-  },
 
-  modalCloseButton: {
-    position: 'absolute',
-    top: 16,
-    right: 16,
-    width: 48,
-    height: 48,
-    borderRadius: 16,
-    borderWidth: 1.1,
-    borderColor: COLORS.border,
-    backgroundColor: '#061522',
-    alignItems: 'center',
-    justifyContent: 'center',
-    zIndex: 5,
-  },
 
-  modalBookmarkGlow: {
-    width: 92,
-    height: 86,
-    alignSelf: 'center',
-    alignItems: 'center',
-    justifyContent: 'center',
-    position: 'relative',
-    marginBottom: 3,
-  },
 
-  modalBookmarkCircle: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    borderWidth: 1.2,
-    borderColor: '#6638BB',
-    backgroundColor: '#18103B',
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: COLORS.purple,
-    shadowOpacity: 0.7,
-    shadowRadius: 20,
-    elevation: 10,
-  },
 
-  modalSparkLeft: {
-    position: 'absolute',
-    left: 0,
-    top: 28,
-    color: COLORS.cyan,
-    fontSize: 21,
-  },
 
-  modalSparkRight: {
-    position: 'absolute',
-    right: 0,
-    top: 25,
-    color: COLORS.purple,
-    fontSize: 20,
-  },
 
-  modalSparkTop: {
-    position: 'absolute',
-    right: 21,
-    top: 3,
-    color: '#7656FF',
-    fontSize: 15,
-  },
 
-  modalTitle: {
-    color: COLORS.white,
-    textAlign: 'center',
-    fontSize: 24,
-    lineHeight: 29,
-    fontWeight: '700',
-    marginTop: 4,
-  },
 
-  modalDescription: {
-    color: COLORS.textSecondary,
-    textAlign: 'center',
-    fontSize: 13,
-    lineHeight: 20,
-    marginTop: 10,
-    marginBottom: 16,
-  },
 
-  modalCharacterRow: {
-    minHeight: 109,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    borderRadius: 15,
-    backgroundColor: '#03131D',
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 10,
-    marginBottom: 10,
-  },
 
-  modalCharacterImageWrap: {
-    width: 92,
-    height: 92,
-    borderRadius: 18,
-    borderWidth: 1.1,
-    borderColor: '#0E5C71',
-    backgroundColor: '#071A23',
-    overflow: 'hidden',
-    flexShrink: 0,
-  },
 
-  modalCharacterImage: {
-    width: '100%',
-    height: '100%',
-  },
 
-  modalCharacterCopy: {
-    flex: 1,
-    minWidth: 0,
-    marginLeft: 12,
-    paddingRight: 7,
-  },
 
-  modalCharacterName: {
-    color: COLORS.white,
-    fontSize: 18,
-    lineHeight: 22,
-    fontWeight: '700',
-  },
 
-  modalNewBadge: {
-    alignSelf: 'flex-start',
-    backgroundColor: '#281440',
-    borderRadius: 12,
-    paddingHorizontal: 9,
-    paddingVertical: 5,
-    marginTop: 5,
-  },
 
-  modalNewBadgeText: {
-    color: COLORS.purple,
-    fontSize: 10.5,
-    lineHeight: 13,
-    fontWeight: '600',
-  },
 
-  modalCharacterDescription: {
-    color: COLORS.textSecondary,
-    fontSize: 11.5,
-    lineHeight: 17,
-    marginTop: 7,
-  },
 
-  modalCheckButton: {
-    width: 51,
-    height: 51,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexShrink: 0,
-  },
 
-  modalCheckButtonSelected: {
-    backgroundColor: COLORS.cyan,
-    borderWidth: 1,
-    borderColor: '#067A92',
-    shadowColor: COLORS.cyan,
-    shadowOpacity: 0.35,
-    shadowRadius: 10,
-    elevation: 5,
-  },
 
-  modalCheckButtonUnselected: {
-    backgroundColor: '#04131C',
-    borderWidth: 1.4,
-    borderColor: '#244558',
-  },
 
-  modalInfoBar: {
-    minHeight: 58,
-    borderWidth: 1,
-    borderColor: '#0A5262',
-    borderRadius: 14,
-    backgroundColor: '#041D27',
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-    marginTop: 1,
-  },
 
-  modalInfoText: {
-    flex: 1,
-    color: COLORS.textSecondary,
-    fontSize: 11.5,
-    lineHeight: 17,
-    marginLeft: 9,
-  },
 
-  modalActions: {
-    flexDirection: 'row',
-    gap: 10,
-    marginTop: 14,
-  },
 
-  dontSaveButton: {
-    flex: 1,
-    height: 57,
-    borderRadius: 15,
-    borderWidth: 1.3,
-    borderColor: '#53657E',
-    backgroundColor: '#030E18',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
 
-  dontSaveText: {
-    color: COLORS.white,
-    fontSize: 14,
-    lineHeight: 18,
-    fontWeight: '600',
-  },
 
-  saveContinueButton: {
-    flex: 1,
-    height: 57,
-    borderRadius: 15,
-    overflow: 'hidden',
-    shadowColor: COLORS.cyan,
-    shadowOpacity: 0.3,
-    shadowRadius: 15,
-    elevation: 8,
-  },
 
-  saveContinueGradient: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 8,
-  },
 
-  saveContinueText: {
-    color: COLORS.white,
-    fontSize: 14,
-    lineHeight: 18,
-    fontWeight: '700',
-    marginHorizontal: 9,
-  },
 
-  saveContinueSpark: {
-    color: '#B8D8FF',
-    fontSize: 15,
-  },
 
-  modalFooter: {
-    minHeight: 46,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 10,
-  },
 
-  modalFooterText: {
-    color: COLORS.textMuted,
-    fontSize: 10.5,
-    lineHeight: 15,
-    textAlign: 'center',
-    marginLeft: 6,
-  },
 
   /* ============================================================
      FIXED CONTINUE
@@ -2619,6 +2007,10 @@ const styles = StyleSheet.create({
   continuePressed: {
     opacity: 0.9,
     transform: [{ scale: 0.985 }],
+  },
+
+  continueDisabled: {
+    opacity: 0.62,
   },
 
   continueText: {

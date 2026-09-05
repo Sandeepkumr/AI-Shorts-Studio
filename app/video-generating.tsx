@@ -20,7 +20,7 @@ import {
 
 import { LinearGradient } from 'expo-linear-gradient';
 import { Feather as Icon } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Circle, Defs, LinearGradient as SvgLinearGradient, Stop } from 'react-native-svg';
 
@@ -49,26 +49,60 @@ const PROGRESS_GRADIENT = {
   end: '#8C2EFF',
 };
 
+const API_BASE_URL =
+  'http://192.168.31.189:4000';
+
+const ASSETS = {
+  coin: require('../assets/coin.png'),
+  hero: require('../assets/text-video-hero.png'),
+} as const;
+
 type StepStatus =
   | 'Waiting'
   | 'In progress...'
   | 'Completed';
 
-type ProcessingStep = {
-  key: keyof typeof STEP_RANGES;
-  title: string;
+type BackendStage =
+  | 'preparing'
+  | 'clips'
+  | 'joining'
+  | 'audio'
+  | 'finalizing'
+  | 'completed'
+  | 'failed';
+
+type VideoJobStatus =
+  | 'queued'
+  | 'processing'
+  | 'completed'
+  | 'failed';
+
+type VideoJobResponse = {
+  success?: boolean;
+  jobId?: string;
+  status?: VideoJobStatus;
+  stage?: BackendStage;
+  progress?: number;
+  currentClip?: number;
+  totalClips?: number;
+  durationSeconds?: number;
+  aspectRatio?: string;
+  style?: string;
+  language?: string;
+  voice?: string;
+  video?: string;
+  model?: string;
+  error?: string;
 };
 
-const storyData = {
-  title: 'Switzerland Travel Story',
-
-  description:
-    'A breathtaking journey through the beautiful landscapes of Switzerland.',
-
-  duration: '60 sec',
-  aspectRatio: '9:16',
-  style: 'Cinematic',
-  voice: 'Female Voice',
+type ProcessingStep = {
+  key:
+    | 'analyzing'
+    | 'clips'
+    | 'joining'
+    | 'audio'
+    | 'finalizing';
+  title: string;
 };
 
 const PROCESSING_STEPS: ProcessingStep[] = [
@@ -81,12 +115,12 @@ const PROCESSING_STEPS: ProcessingStep[] = [
     title: 'Generating video clips',
   },
   {
-    key: 'transitions',
-    title: 'Adding transitions & effects',
+    key: 'joining',
+    title: 'Joining scenes',
   },
   {
     key: 'audio',
-    title: 'Syncing audio & captions',
+    title: 'Creating voiceover',
   },
   {
     key: 'finalizing',
@@ -94,38 +128,29 @@ const PROCESSING_STEPS: ProcessingStep[] = [
   },
 ];
 
-const STEP_RANGES = {
-  analyzing: {
-    start: 0,
-    end: 20,
-  },
-
-  clips: {
-    start: 20,
-    end: 40,
-  },
-
-  transitions: {
-    start: 40,
-    end: 60,
-  },
-
-  audio: {
-    start: 60,
-    end: 80,
-  },
-
-  finalizing: {
-    start: 80,
-    end: 100,
-  },
-};
-
 const AnimatedCircle =
   Animated.createAnimatedComponent(Circle);
 
 const ProcessingScreen = () => {
   const router = useRouter();
+
+  const params = useLocalSearchParams<{
+    jobId?: string;
+    story?: string;
+    title?: string;
+    duration?: string;
+    ratio?: string;
+    style?: string;
+    language?: string;
+    voice?: string;
+    camera?: string;
+    appearance?: string;
+    analysis?: string;
+    config?: string;
+    status?: string;
+    stage?: string;
+    progress?: string;
+  }>();
 
   const {
     width: screenWidth,
@@ -254,11 +279,71 @@ const ProcessingScreen = () => {
   ]);
 
   /* ==========================================================
-     MAIN PROGRESS
+     REAL GENERATION STATE
   ========================================================== */
 
   const [mainProgress, setMainProgress] =
-    useState(0);
+    useState(
+      Math.max(
+        0,
+        Math.min(
+          100,
+          Number(params.progress) || 0,
+        ),
+      ),
+    );
+
+  const [jobStatus, setJobStatus] =
+    useState<VideoJobStatus>(
+      params.status === 'completed'
+        ? 'completed'
+        : params.status === 'failed'
+          ? 'failed'
+          : 'processing',
+    );
+
+  const [jobStage, setJobStage] =
+    useState<BackendStage>(
+      params.stage === 'clips' ||
+      params.stage === 'joining' ||
+      params.stage === 'audio' ||
+      params.stage === 'finalizing' ||
+      params.stage === 'completed' ||
+      params.stage === 'failed'
+        ? (params.stage as BackendStage)
+        : 'preparing',
+    );
+
+  const [currentClip, setCurrentClip] =
+    useState(
+      0,
+    );
+
+  const [totalClips, setTotalClips] =
+    useState(
+      Math.max(
+        1,
+        Number(params.duration || 30) / 5,
+      ),
+    );
+
+  const [videoUrl, setVideoUrl] =
+    useState<string | null>(
+      null,
+    );
+
+  const [errorMessage, setErrorMessage] =
+    useState<string | null>(
+      null,
+    );
+
+  const [isPolling, setIsPolling] =
+    useState(true);
+
+  // Prevent duplicate navigation if completion is observed
+  // more than once during polling or re-renders.
+  const hasNavigatedToCompleteRef =
+    useRef(false);
 
   /* ==========================================================
      ANIMATIONS
@@ -291,54 +376,486 @@ const ProcessingScreen = () => {
   const circumference =
     2 * Math.PI * radius;
 
-  /* ==========================================================
-     RUNNING PROGRESS
-  ========================================================== */
+  const displayTitle =
+    params.title?.trim() ||
+    'Your Story';
 
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setMainProgress((current) => {
-        if (current >= 100) {
-          clearInterval(interval);
-          return 100;
-        }
+  const displayDescription =
+    params.story?.trim() ||
+    'Your video is being created from your approved story.';
 
-        return current + 1;
-      });
-    }, 550);
+  const displayDuration =
+    params.duration?.trim() ||
+    String(
+      Math.max(
+        15,
+        totalClips * 5,
+      ),
+    );
 
-    return () => {
-      clearInterval(interval);
-    };
-  }, []);
+  const displayRatio =
+    params.ratio?.trim() ||
+    '9:16';
 
-  /* ==========================================================
-     COMPLETE
-  ========================================================== */
+  const displayStyle =
+    params.style?.trim() ||
+    '3d';
 
-  useEffect(() => {
-    if (mainProgress >= 100) {
-      if (waveAnimationRef.current) {
-        waveAnimationRef.current.stop();
-        waveAnimationRef.current = null;
+  const displayVoice =
+    params.voice?.trim() ||
+    'auto';
+
+  const displayLanguage =
+    params.language?.trim() ||
+    'English (US)';
+
+  const progressStep = (
+    stepKey: ProcessingStep['key'],
+  ): {
+    status: StepStatus;
+    progress: number;
+  } => {
+    const stageOrder: ProcessingStep['key'][] = [
+      'analyzing',
+      'clips',
+      'joining',
+      'audio',
+      'finalizing',
+    ];
+
+    const currentIndex =
+      jobStage === 'preparing'
+        ? 0
+        : jobStage === 'clips'
+          ? 1
+          : jobStage === 'joining'
+            ? 2
+            : jobStage === 'audio'
+              ? 3
+              : jobStage === 'finalizing'
+                ? 4
+                : jobStage === 'completed'
+                  ? 5
+                  : -1;
+
+    const stepIndex =
+      stageOrder.indexOf(
+        stepKey,
+      );
+
+    if (
+      jobStatus ===
+      'failed'
+    ) {
+      if (
+        stepIndex <
+        currentIndex
+      ) {
+        return {
+          status:
+            'Completed',
+          progress:
+            100,
+        };
       }
 
-      waveOpacity.setValue(1);
-      waveScale.setValue(1);
+      if (
+        stepIndex ===
+        currentIndex
+      ) {
+        return {
+          status:
+            'In progress...',
+          progress:
+            100,
+        };
+      }
 
-      const timeout = setTimeout(() => {
-        router.replace('/complete-video');
-      }, 600);
-
-      return () => {
-        clearTimeout(timeout);
+      return {
+        status:
+          'Waiting',
+        progress:
+          0,
       };
     }
+
+    if (
+      stepIndex <
+      currentIndex
+    ) {
+      return {
+        status:
+          'Completed',
+        progress:
+          100,
+      };
+    }
+
+    if (
+      stepIndex >
+      currentIndex
+    ) {
+      return {
+        status:
+          'Waiting',
+        progress:
+          0,
+      };
+    }
+
+    if (
+      jobStage ===
+      'completed'
+    ) {
+      return {
+        status:
+          'Completed',
+        progress:
+          100,
+      };
+    }
+
+    let localProgress =
+      0;
+
+    if (
+      stepKey ===
+      'analyzing'
+    ) {
+      if (
+        jobStage ===
+        'preparing'
+      ) {
+        localProgress =
+          Math.min(
+            100,
+            (mainProgress /
+              10) *
+              100,
+          );
+      } else {
+        localProgress = 100;
+      }
+    } else if (
+      stepKey ===
+      'clips'
+    ) {
+      const clipProgress =
+        totalClips > 0
+          ? currentClip /
+            totalClips
+          : 0;
+
+      localProgress =
+        jobStage ===
+          'clips'
+          ? Math.round(
+              clipProgress *
+                100,
+            )
+          : 100;
+    } else if (
+      stepKey ===
+      'joining'
+    ) {
+      localProgress =
+        jobStage ===
+          'joining'
+          ? 55
+          : 100;
+    } else if (
+      stepKey ===
+      'audio'
+    ) {
+      localProgress =
+        jobStage ===
+          'audio'
+          ? 60
+          : 100;
+    } else {
+      localProgress =
+        jobStage ===
+          'finalizing'
+          ? mainProgress
+          : 100;
+    }
+
+    return {
+      status:
+        'In progress...',
+      progress:
+        Math.max(
+          0,
+          Math.min(
+            100,
+            Math.round(
+              localProgress,
+            ),
+          ),
+        ),
+    };
+  };
+
+  const steps = useMemo(() => {
+    return PROCESSING_STEPS.map(
+      (step) => ({
+        ...step,
+        ...progressStep(
+          step.key,
+        ),
+      }),
+    );
   }, [
+    jobStage,
+    jobStatus,
     mainProgress,
+    currentClip,
+    totalClips,
+  ]);
+
+  /* ==========================================================
+     REAL JOB POLLING
+  ========================================================== */
+
+  useEffect(() => {
+    const jobId = params.jobId;
+
+    if (!jobId) {
+      setErrorMessage(
+        'Video generation job ID is missing.',
+      );
+      setJobStatus('failed');
+      setIsPolling(false);
+      return;
+    }
+
+    let isMounted = true;
+    let timer: ReturnType<typeof setTimeout> | null =
+      null;
+
+    const pollStatus = async () => {
+      if (!isMounted) {
+        return;
+      }
+
+      try {
+        const response =
+          await fetch(
+            `${API_BASE_URL}/video/status/${encodeURIComponent(jobId)}`,
+          );
+
+        const data =
+          (await response.json()) as VideoJobResponse;
+
+        if (!response.ok || !data.success) {
+          throw new Error(
+            data.error ||
+              'Unable to read video generation status.',
+          );
+        }
+
+        if (!isMounted) {
+          return;
+        }
+
+        setJobStatus(
+          data.status ??
+            'processing',
+        );
+
+        setJobStage(
+          data.stage ??
+            'preparing',
+        );
+
+        setMainProgress(
+          Math.max(
+            0,
+            Math.min(
+              100,
+              Number(data.progress) || 0,
+            ),
+          ),
+        );
+
+        if (
+          typeof data.currentClip ===
+          'number'
+        ) {
+          setCurrentClip(
+            data.currentClip,
+          );
+        }
+
+        if (
+          typeof data.totalClips ===
+          'number'
+        ) {
+          setTotalClips(
+            Math.max(
+              1,
+              data.totalClips,
+            ),
+          );
+        }
+
+        const completedVideoUrl =
+          data.video;
+
+        if (completedVideoUrl) {
+          setVideoUrl(
+            completedVideoUrl,
+          );
+        }
+
+        if (
+          data.status ===
+          'completed'
+        ) {
+          setMainProgress(100);
+          setJobStage('completed');
+          setIsPolling(false);
+
+          // Navigate only after the backend explicitly reports
+          // completion and provides the finished MP4 URL.
+          if (
+            completedVideoUrl &&
+            !hasNavigatedToCompleteRef.current
+          ) {
+            hasNavigatedToCompleteRef.current = true;
+
+            router.replace({
+              pathname:
+                '/complete-video',
+              params: {
+                videoUrl:
+                  completedVideoUrl,
+                story:
+                  params.story ?? '',
+                title:
+                  params.title ?? '',
+                duration:
+                  params.duration ??
+                  '30',
+                ratio:
+                  params.ratio ??
+                  '9:16',
+                style:
+                  params.style ??
+                  '',
+                language:
+                  params.language ??
+                  'English (US)',
+                voice:
+                  params.voice ??
+                  'auto',
+              },
+            });
+
+            return;
+          }
+
+          // Do not leave the screen merely because status is
+          // completed if the response did not contain the video.
+          timer = setTimeout(
+            pollStatus,
+            1000,
+          );
+
+          return;
+        }
+
+        if (
+          data.status ===
+          'failed'
+        ) {
+          setErrorMessage(
+            data.error ||
+              'Video generation failed.',
+          );
+          setIsPolling(false);
+          return;
+        }
+
+        timer = setTimeout(
+          pollStatus,
+          1500,
+        );
+      } catch (error) {
+        console.error(
+          '[VIDEO GENERATING] Status polling error:',
+          error,
+        );
+
+        if (!isMounted) {
+          return;
+        }
+
+        setErrorMessage(
+          error instanceof Error
+            ? error.message
+            : 'Unable to check video generation status.',
+        );
+
+        setJobStatus(
+          'failed',
+        );
+
+        setJobStage(
+          'failed',
+        );
+
+        setIsPolling(false);
+      }
+    };
+
+    void pollStatus();
+
+    return () => {
+      isMounted = false;
+
+      if (timer) {
+        clearTimeout(timer);
+      }
+    };
+  }, [
+    params.jobId,
+    params.story,
+    params.title,
+    params.duration,
+    params.ratio,
+    params.style,
+    params.language,
+    params.voice,
     router,
-    waveOpacity,
-    waveScale,
+  ]);
+
+  /* ==========================================================
+     FAILURE
+  ========================================================== */
+
+  useEffect(() => {
+    if (
+      jobStatus !==
+      'failed'
+    ) {
+      return;
+    }
+
+    if (!errorMessage) {
+      return;
+    }
+
+    // Keep the generating screen visible so the user
+    // can see the failure state instead of being sent
+    // to the completion screen.
+    console.warn(
+      '[VIDEO GENERATING] Job failed:',
+      errorMessage,
+    );
+  }, [
+    jobStatus,
+    errorMessage,
   ]);
 
   /* ==========================================================
@@ -405,62 +922,6 @@ const ProcessingScreen = () => {
   }, [waveOpacity, waveScale]);
 
   /* ==========================================================
-     STEPS
-  ========================================================== */
-
-  const steps = useMemo(() => {
-    return PROCESSING_STEPS.map(
-      (step) => {
-        const range =
-          STEP_RANGES[step.key];
-
-        let status: StepStatus =
-          'Waiting';
-
-        let progress = 0;
-
-        if (
-          mainProgress <
-          range.start
-        ) {
-          status = 'Waiting';
-          progress = 0;
-        } else if (
-          mainProgress <
-          range.end
-        ) {
-          status =
-            'In progress...';
-
-          progress =
-            ((mainProgress -
-              range.start) /
-              (range.end -
-                range.start)) *
-            100;
-
-          progress = Math.max(
-            0,
-            Math.min(
-              100,
-              progress
-            )
-          );
-        } else {
-          status = 'Completed';
-          progress = 100;
-        }
-
-        return {
-          ...step,
-          status,
-          progress,
-        };
-      }
-    );
-  }, [mainProgress]);
-
-  /* ==========================================================
      RING OFFSET
   ========================================================== */
 
@@ -473,6 +934,120 @@ const ProcessingScreen = () => {
         0,
       ],
     });
+
+const getStatusSubtitle = (
+  stage: BackendStage,
+  currentClip: number,
+  totalClips: number,
+): string => {
+  switch (stage) {
+    case 'preparing':
+      return 'Preparing your story and scenes.';
+    case 'clips':
+      return `Generating scene ${Math.min(
+        Math.max(currentClip, 1),
+        totalClips,
+      )} of ${totalClips}.`;
+    case 'joining':
+      return 'Joining your generated scenes.';
+    case 'audio':
+      return 'Creating and syncing your voiceover.';
+    case 'finalizing':
+      return 'Applying the final touches to your video.';
+    case 'completed':
+      return 'Your video is ready.';
+    case 'failed':
+      return 'Something went wrong while creating your video.';
+    default:
+      return 'Preparing your video.';
+  }
+};
+
+const getStageHeadline = (
+  stage: BackendStage,
+  currentClip: number,
+  totalClips: number,
+): string => {
+  switch (stage) {
+    case 'preparing':
+      return 'Analyzing your story...';
+    case 'clips':
+      return `Creating scene ${Math.min(
+        Math.max(currentClip, 1),
+        totalClips,
+      )} of ${totalClips}...`;
+    case 'joining':
+      return 'Joining your scenes...';
+    case 'audio':
+      return 'Creating your voiceover...';
+    case 'finalizing':
+      return 'Finalizing your video...';
+    case 'completed':
+      return 'Your video is ready!';
+    default:
+      return 'Working on your video...';
+  }
+};
+
+const getStageLabel = (
+  stage: BackendStage,
+): string => {
+  switch (stage) {
+    case 'preparing':
+      return 'Preparing...';
+    case 'clips':
+      return 'Generating...';
+    case 'joining':
+      return 'Joining...';
+    case 'audio':
+      return 'Voiceover...';
+    case 'finalizing':
+      return 'Finalizing...';
+    case 'completed':
+      return 'Complete';
+    case 'failed':
+      return 'Failed';
+    default:
+      return 'Working...';
+  }
+};
+
+const formatStyle = (
+  value: string,
+): string => {
+  switch (value) {
+    case '3d':
+      return '3D Animation';
+    case 'cinematic':
+      return 'Cinematic';
+    case 'realistic':
+      return 'Realistic';
+    case 'anime':
+      return 'Anime';
+    case 'cartoon':
+      return 'Cartoon';
+    default:
+      return value;
+  }
+};
+
+const formatVoice = (
+  value: string,
+  language: string,
+): string => {
+  switch (value) {
+    case 'female':
+      return 'Female Voice';
+    case 'male':
+      return 'Male Voice';
+    case 'none':
+      return 'No Voice';
+    case 'auto':
+      return `AI Auto (${language})`;
+    default:
+      return value;
+  }
+};
 
   /* ==========================================================
      STEP ICON
@@ -721,11 +1296,17 @@ const ProcessingScreen = () => {
 
                 lineHeight:
                   sizes.titleLineHeight,
+                color:
+                  jobStatus === 'failed'
+                    ? '#FF7D8A'
+                    : COLORS.white,
               },
             ]}
             numberOfLines={1}
           >
-            Generating Your Video
+            {jobStatus === 'failed'
+              ? 'Video Generation Failed'
+              : 'Generating Your Video'}
           </Text>
 
           <Text
@@ -747,7 +1328,13 @@ const ProcessingScreen = () => {
             ]}
             numberOfLines={1}
           >
-            Sit back and relax! Your video is being created.
+            {jobStatus === 'failed'
+              ? 'Something went wrong while creating your video.'
+              : getStatusSubtitle(
+                  jobStage,
+                  currentClip,
+                  totalClips,
+                )}
           </Text>
 
           {/* STORY CARD */}
@@ -783,7 +1370,7 @@ const ProcessingScreen = () => {
               ]}
             >
               <Image
-                source={require('../assets/switzerland_story.png')}
+                source={ASSETS.hero}
                 style={
                   styles.thumbnail
                 }
@@ -852,7 +1439,7 @@ const ProcessingScreen = () => {
                 }
               >
                 {
-                  storyData.title
+                  displayTitle
                 }
               </Text>
 
@@ -875,7 +1462,7 @@ const ProcessingScreen = () => {
                 }
               >
                 {
-                  storyData.description
+                  displayDescription
                 }
               </Text>
 
@@ -913,7 +1500,7 @@ const ProcessingScreen = () => {
                     ]}
                   >
                     {
-                      storyData.duration
+                      `${displayDuration} sec`
                     }
                   </Text>
                 </View>
@@ -947,7 +1534,7 @@ const ProcessingScreen = () => {
                     ]}
                   >
                     {
-                      storyData.aspectRatio
+                      displayRatio
                     }
                   </Text>
                 </View>
@@ -981,7 +1568,9 @@ const ProcessingScreen = () => {
                     ]}
                   >
                     {
-                      storyData.style
+                      formatStyle(
+                        displayStyle,
+                      )
                     }
                   </Text>
                 </View>
@@ -1011,7 +1600,10 @@ const ProcessingScreen = () => {
                     ]}
                   >
                     {
-                      storyData.voice
+                      formatVoice(
+                        displayVoice,
+                        displayLanguage,
+                      )
                     }
                   </Text>
                 </View>
@@ -1200,7 +1792,23 @@ const ProcessingScreen = () => {
                     },
                   ]}
                 >
-                  Generating...
+                  {jobStatus === 'failed'
+                    ? 'Failed'
+                    : jobStatus === 'completed'
+                      ? 'Complete'
+                      : !isPolling
+                        ? 'Waiting...'
+                        : jobStage === 'clips'
+                          ? `Scene ${Math.min(
+                              Math.max(
+                                currentClip,
+                                1,
+                              ),
+                              totalClips,
+                            )} of ${totalClips}`
+                          : getStageLabel(
+                              jobStage,
+                            )}
                 </Text>
               </View>
             </View>
@@ -1221,7 +1829,13 @@ const ProcessingScreen = () => {
             ]}
             numberOfLines={1}
           >
-            Creating amazing scenes for you...
+            {jobStatus === 'failed'
+              ? 'Your video could not be completed.'
+              : getStageHeadline(
+                  jobStage,
+                  currentClip,
+                  totalClips,
+                )}
           </Text>
 
           <Text
@@ -1243,8 +1857,10 @@ const ProcessingScreen = () => {
             ]}
             numberOfLines={2}
           >
-            This may take a few minutes. You can safely leave the
-            screen and come back later.
+            {jobStatus === 'failed'
+              ? errorMessage ||
+                'Please return and try again.'
+              : `Generating ${totalClips} five-second clips for your ${displayDuration}-second video.`}
           </Text>
 
           {/* STEPS */}
@@ -1468,12 +2084,53 @@ const ProcessingScreen = () => {
                 ]}
                 numberOfLines={2}
               >
-                Your video is generated in the background.
-                You don't need to keep this screen open.
+                {jobStatus === 'failed'
+                  ? 'Check your settings and try generating the video again.'
+                  : `Shivora is processing your ${displayDuration}-second ${formatStyle(
+                      displayStyle,
+                    )} video. Keep this screen open while it completes.`}
               </Text>
             </View>
           </View>
 
+          {jobStatus === 'failed' && (
+            <TouchableOpacity
+              activeOpacity={0.85}
+              style={[
+                styles.retryButton,
+                {
+                  height:
+                    sizes.cancelHeight,
+                  borderRadius:
+                    24 * scale,
+                  marginTop:
+                    8 * scale,
+                },
+              ]}
+              onPress={() => {
+                router.back();
+              }}
+            >
+              <Icon
+                name="arrow-left"
+                size={sizes.cancelIcon}
+                color={COLORS.primary}
+              />
+              <Text
+                style={[
+                  styles.cancelButtonText,
+                  {
+                    fontSize:
+                      sizes.cancelText,
+                    marginLeft:
+                      8 * scale,
+                  },
+                ]}
+              >
+                Back to Preview
+              </Text>
+            </TouchableOpacity>
+          )}
 
         </ScrollView>
       </LinearGradient>
@@ -2028,6 +2685,16 @@ const styles = StyleSheet.create({
   },
 
   /* Cancel */
+
+  retryButton: {
+    width: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1.3,
+    borderColor: COLORS.primary,
+    backgroundColor: 'rgba(0,230,208,0.015)',
+  },
 
   cancelButton: {
     width:

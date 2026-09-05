@@ -1,6 +1,10 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
+  Animated,
+  BackHandler,
+  Easing,
   Image,
   KeyboardAvoidingView,
   Platform,
@@ -29,6 +33,7 @@ const ASSETS = {
   aiCharacter: require('../../assets/ai-character.png'),
   characterBlueprint: require('../../assets/character-blueprint.png'),
   aiSuggestion: require('../../assets/ai-suggestion.png'),
+  shivoraLoader: require('../../assets/shivora-loader.png'),
 };
 
 /* =========================================================
@@ -56,6 +61,8 @@ const COLORS = {
 
 const MAX_STORY_LENGTH = 2000;
 
+const API_BASE_URL = "http://192.168.31.189:4000";
+
 const EXAMPLE_TEXT =
   'A brave little robot explores a magical forest, meets friendly creatures and discovers a hidden treasure.';
 
@@ -67,6 +74,159 @@ const AI_ITEMS = [
   { icon: 'pulse-outline' as const, label: 'Voiceover' },
 ];
 
+
+/* =========================================================
+   SHIVORA ANALYSIS LOADER
+   ========================================================= */
+
+function ShivoraAnalysisLoader() {
+  const rotation = useRef(
+    new Animated.Value(0),
+  ).current;
+
+  const pulse = useRef(
+    new Animated.Value(1),
+  ).current;
+
+  useEffect(() => {
+    const rotateLoop =
+      Animated.loop(
+        Animated.timing(rotation, {
+          toValue: 1,
+          duration: 4800,
+          easing: Easing.linear,
+          useNativeDriver: true,
+        }),
+      );
+
+    const pulseLoop =
+      Animated.loop(
+        Animated.sequence([
+          Animated.timing(pulse, {
+            toValue: 1.035,
+            duration: 900,
+            easing: Easing.inOut(Easing.ease),
+            useNativeDriver: true,
+          }),
+          Animated.timing(pulse, {
+            toValue: 1,
+            duration: 900,
+            easing: Easing.inOut(Easing.ease),
+            useNativeDriver: true,
+          }),
+        ]),
+      );
+
+    rotateLoop.start();
+    pulseLoop.start();
+
+    return () => {
+      rotateLoop.stop();
+      pulseLoop.stop();
+    };
+  }, [pulse, rotation]);
+
+  const rotate = rotation.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['0deg', '360deg'],
+  });
+
+  return (
+    <View
+      style={styles.analysisLoaderOverlay}
+      pointerEvents="auto"
+      accessibilityViewIsModal
+      accessibilityLabel="Shivora is analyzing your story"
+    >
+      <View style={styles.analysisLoaderBackdrop} />
+
+      <View style={styles.analysisLoaderContent}>
+        <Animated.View
+          style={[
+            styles.analysisLoaderArtworkWrap,
+            {
+              transform: [
+                { rotate },
+                { scale: pulse },
+              ],
+            },
+          ]}
+        >
+          <Image
+            source={ASSETS.shivoraLoader}
+            resizeMode="contain"
+            style={styles.analysisLoaderArtwork}
+          />
+        </Animated.View>
+
+        <Text style={styles.analysisLoaderTitle}>
+          Analyzing your story...
+        </Text>
+
+        <Text style={styles.analysisLoaderSubtitle}>
+          Creating characters & scenes
+        </Text>
+
+        <View style={styles.analysisLoaderDots}>
+          <AnimatedDot delay={0} />
+          <AnimatedDot delay={180} />
+          <AnimatedDot delay={360} />
+          <AnimatedDot delay={540} />
+        </View>
+      </View>
+    </View>
+  );
+}
+
+function AnimatedDot({
+  delay,
+}: {
+  delay: number;
+}) {
+  const opacity = useRef(
+    new Animated.Value(0.35),
+  ).current;
+
+  useEffect(() => {
+    const loop =
+      Animated.loop(
+        Animated.sequence([
+          Animated.delay(delay),
+          Animated.timing(opacity, {
+            toValue: 1,
+            duration: 450,
+            easing: Easing.inOut(Easing.ease),
+            useNativeDriver: true,
+          }),
+          Animated.timing(opacity, {
+            toValue: 0.35,
+            duration: 450,
+            easing: Easing.inOut(Easing.ease),
+            useNativeDriver: true,
+          }),
+          Animated.delay(
+            Math.max(0, 540 - delay),
+          ),
+        ]),
+      );
+
+    loop.start();
+
+    return () => {
+      loop.stop();
+    };
+  }, [delay, opacity]);
+
+  return (
+    <Animated.View
+      style={[
+        styles.analysisLoaderDot,
+        { opacity },
+      ]}
+    />
+  );
+}
+
 /* =========================================================
    SCREEN
    ========================================================= */
@@ -75,6 +235,23 @@ export default function CreateVideoScreen() {
   const router = useRouter();
   const { width } = useWindowDimensions();
   const [story, setStory] = useState('');
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+
+  useEffect(() => {
+    if (!isAnalyzing) {
+      return;
+    }
+
+    const subscription =
+      BackHandler.addEventListener(
+        'hardwareBackPress',
+        () => true,
+      );
+
+    return () => {
+      subscription.remove();
+    };
+  }, [isAnalyzing]);
 
   /*
    * The reference image is a compact iPhone layout.
@@ -89,7 +266,7 @@ export default function CreateVideoScreen() {
     setStory(value.slice(0, MAX_STORY_LENGTH));
   };
 
-  const handleContinue = () => {
+  const handleContinue = async () => {
     const cleanStory = story.trim();
 
     if (!cleanStory) {
@@ -100,10 +277,166 @@ export default function CreateVideoScreen() {
       return;
     }
 
-    router.push({
-      pathname: '/customize-story' as any,
-      params: { story: cleanStory },
-    });
+    if (isAnalyzing) {
+      return;
+    }
+
+    setIsAnalyzing(true);
+
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/story/analyze`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            story: cleanStory,
+          }),
+        },
+      );
+
+      type StoryCharacterPayload = {
+        id: string;
+        name: string;
+        role: string;
+        visualDescription: string;
+        imagePrompt: string;
+        imageUrl?: string;
+      };
+
+      type StoryCharacterPlanPayload = {
+        characterId: string;
+        actions: string[];
+        emotion: string;
+        expression: string;
+        bodyLanguage: string[];
+        startState: string;
+        endState: string;
+      };
+
+      type StoryContinuityPayload = {
+        previousSceneNumber?: number;
+        inheritedCharacterStates?: Record<string, string>;
+        locationContinues?: boolean;
+        requiredContinuity?: string[];
+      };
+
+      type StoryBeatPayload = {
+        sceneNumber: number;
+        id?: string;
+        title: string;
+        description: string;
+        narration: string;
+        durationSeconds: number;
+        location?: string;
+        visibleCharacterIds: string[];
+        actions: string[];
+        characterPlans: StoryCharacterPlanPayload[];
+        startState: string;
+        endState: string;
+        continuity?: StoryContinuityPayload;
+      };
+
+      const data = (await response.json()) as {
+        success?: boolean;
+        title?: string;
+        summary?: string;
+        characters?: StoryCharacterPayload[];
+        storyBeats?: StoryBeatPayload[];
+        scenes?: StoryBeatPayload[];
+        storyEvents?: unknown[];
+        error?: string;
+      };
+
+      const structuredStoryBeats =
+        Array.isArray(data.storyBeats) &&
+        data.storyBeats.length > 0
+          ? data.storyBeats
+          : Array.isArray(data.scenes)
+            ? data.scenes
+            : [];
+
+      if (
+        !response.ok ||
+        !data.success ||
+        structuredStoryBeats.length === 0
+      ) {
+        throw new Error(
+          data.error || 'Unable to analyze your story.',
+        );
+      }
+
+      console.log(
+        '[T2V] OpenAI characters received:',
+        data.characters,
+      );
+
+      console.log(
+        '[T2V] Structured story beats received:',
+        structuredStoryBeats,
+      );
+
+      /*
+       * IMPORTANT:
+       * Preserve the complete story manifest when moving from Story
+       * Analysis -> Customize. Do not reduce story beats to the old
+       * title/description/narration-only scene shape.
+       *
+       * The video-intelligence pipeline needs characterPlans, visible
+       * character IDs, actions, states and continuity later.
+       */
+      const analysisPayload = {
+        title: data.title ?? '',
+        summary: data.summary ?? '',
+        characters: Array.isArray(data.characters)
+          ? data.characters
+          : [],
+        storyBeats: structuredStoryBeats,
+
+        // Preserve semantic story events from Story Analysis.
+        // The optimizer uses these events as the canonical source of
+        // truth for beat planning, so they must survive the
+        // Analysis -> Customize -> Optimize handoff.
+        storyEvents: Array.isArray(data.storyEvents)
+          ? data.storyEvents
+          : [],
+
+        // Backward-compatible alias used by existing Customize/Preview
+        // screens. The full structured beat objects are preserved here.
+        scenes: structuredStoryBeats,
+      };
+
+      router.push({
+        pathname: '/customize-story' as any,
+        params: {
+          story: cleanStory,
+          analysis: JSON.stringify(
+            analysisPayload,
+          ),
+          characters: JSON.stringify(
+            Array.isArray(data.characters)
+              ? data.characters
+              : [],
+          ),
+        },
+      });
+    } catch (error) {
+      console.error(
+        'Story analysis error:',
+        error,
+      );
+
+      Alert.alert(
+        'Unable to Analyze Story',
+        error instanceof Error
+          ? error.message
+          : 'Something went wrong while analyzing your story. Please try again.',
+      );
+    } finally {
+      setIsAnalyzing(false);
+    }
   };
 
   const handleExample = () => {
@@ -409,10 +742,18 @@ export default function CreateVideoScreen() {
               style={({ pressed }) => [
                 styles.continueButton,
                 pressed && styles.pressed,
+                isAnalyzing && styles.continueDisabled,
               ]}
-              onPress={handleContinue}
+              onPress={() => {
+                void handleContinue();
+              }}
+              disabled={isAnalyzing}
               accessibilityRole="button"
               accessibilityLabel="Continue"
+              accessibilityState={{
+                disabled: isAnalyzing,
+                busy: isAnalyzing,
+              }}
             >
               <LinearGradient
                 colors={['#00CFFF', '#2C75FF', '#8C2EFF']}
@@ -420,16 +761,25 @@ export default function CreateVideoScreen() {
                 end={{ x: 1, y: 0.5 }}
                 style={styles.continueGradient}
               >
-                <Text style={styles.continueText}>
-                  Continue
-                </Text>
+                {isAnalyzing ? (
+                  <ActivityIndicator
+                    color="#FFFFFF"
+                    size="small"
+                  />
+                ) : (
+                  <>
+                    <Text style={styles.continueText}>
+                      Continue
+                    </Text>
 
-                <Ionicons
-                  name="arrow-forward"
-                  size={29}
-                  color="#FFFFFF"
-                  style={styles.continueArrow}
-                />
+                    <Ionicons
+                      name="arrow-forward"
+                      size={29}
+                      color="#FFFFFF"
+                      style={styles.continueArrow}
+                    />
+                  </>
+                )}
               </LinearGradient>
             </Pressable>
 
@@ -437,6 +787,10 @@ export default function CreateVideoScreen() {
 
         </KeyboardAvoidingView>
       </SafeAreaView>
+
+      {isAnalyzing && (
+        <ShivoraAnalysisLoader />
+      )}
     </View>
   );
 }
@@ -954,8 +1308,81 @@ const styles = StyleSheet.create({
      CONTINUE
      ======================================================= */
 
+  /* =======================================================
+     SHIVORA ANALYSIS LOADER
+     ======================================================= */
+
+  analysisLoaderOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 9999,
+    elevation: 9999,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  analysisLoaderBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(2, 10, 16, 0.96)',
+  },
+
+  analysisLoaderContent: {
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 28,
+  },
+
+  analysisLoaderArtworkWrap: {
+    width: 135,
+    height: 135,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  analysisLoaderArtwork: {
+    width: '100%',
+    height: '100%',
+  },
+
+  analysisLoaderTitle: {
+    color: COLORS.text,
+    fontSize: 22,
+    lineHeight: 28,
+    fontWeight: '700',
+    textAlign: 'center',
+    marginTop: 8,
+  },
+
+  analysisLoaderSubtitle: {
+    color: COLORS.secondary,
+    fontSize: 12.5,
+    lineHeight: 18,
+    fontWeight: '500',
+    textAlign: 'center',
+    marginTop: 6,
+  },
+
+  analysisLoaderDots: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 16,
+  },
+
+  analysisLoaderDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    backgroundColor: COLORS.cyan,
+    marginHorizontal: 4,
+  },
+
   pressed: {
     opacity: 0.78,
+  },
+
+  continueDisabled: {
+    opacity: 0.6,
   },
 
   continueButton: {

@@ -29,6 +29,13 @@
       "when": 1787360362716,
       "tag": "0003_melted_bastion",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1787573673359,
+      "tag": "0004_high_trauma",
+      "breakpoints": true
     }
   ]
 }

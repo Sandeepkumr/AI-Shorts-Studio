@@ -1,5 +1,6 @@
 import React, { useCallback } from 'react';
 import {
+  Alert,
   Image,
   Pressable,
   ScrollView,
@@ -12,25 +13,21 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 
 const COLORS = {
   background: '#020A12',
   card: '#04121A',
   cardSoft: '#061822',
-
   cyan: '#00E5F5',
   purple: '#C35CFF',
   purpleDark: '#211333',
   green: '#10DFAF',
-
   white: '#FFFFFF',
   black: '#001015',
-
   textSecondary: '#C6D0D8',
   textMuted: '#8C99A4',
   muted: '#8C99A4',
-
   border: '#183B4A',
   borderBright: '#154A5D',
   divider: '#213844',
@@ -39,36 +36,119 @@ const COLORS = {
 const ASSETS = {
   coin: require('../assets/coin.png'),
   hero: require('../assets/text-video-hero.png'),
-
-  alex: require('../assets/ai-character-main.png'),
-  shopkeeper: require('../assets/shopkeeper-character.png'),
-
-  scene01: require('../assets/scene-01.png'),
-  scene02: require('../assets/scene-02.png'),
-  scene03: require('../assets/scene-03.png'),
-  scene04: require('../assets/scene-04.png'),
 } as const;
 
-const SCENES = [
+const API_BASE_URL =
+  'http://192.168.31.189:4000';
+
+const resolveCharacterImageUrl = (
+  imageUrl?: string,
+): string | undefined => {
+  if (!imageUrl) {
+    return undefined;
+  }
+
+  const normalizedUrl = imageUrl.trim();
+
+  if (!normalizedUrl) {
+    return undefined;
+  }
+
+  if (
+    normalizedUrl.startsWith('http://') ||
+    normalizedUrl.startsWith('https://')
+  ) {
+    return normalizedUrl;
+  }
+
+  return `${API_BASE_URL}${
+    normalizedUrl.startsWith('/') ? '' : '/'
+  }${normalizedUrl}`;
+};
+
+type PreviewCharacter = {
+  id: string;
+  name: string;
+  role: string;
+  visualDescription: string;
+  imagePrompt?: string;
+  imageUrl?: string;
+};
+
+type CharacterPlan = {
+  characterId: string;
+  actions: string[];
+  emotion: string;
+  expression: string;
+  bodyLanguage: string[];
+  startState: string;
+  endState: string;
+};
+
+type StoryContinuity = {
+  previousSceneNumber?: number;
+  inheritedCharacterStates?: Record<string, string>;
+  locationContinues?: boolean;
+  requiredContinuity?: string[];
+};
+
+type DialogueLine = {
+  characterId: string;
+  text: string;
+  emotion?: string;
+  delivery?: string;
+};
+
+type PreviewScene = {
+  sceneNumber: number;
+  id?: string;
+  title: string;
+  description: string;
+  narration: string;
+  dialogue?: DialogueLine[];
+  durationSeconds: number;
+  location?: string;
+  visibleCharacterIds?: string[];
+  actions?: string[];
+  characterPlans?: CharacterPlan[];
+  startState?: string;
+  endState?: string;
+  continuity?: StoryContinuity;
+};
+
+type StoryAnalysisPayload = {
+  title?: string;
+  summary?: string;
+  characters?: PreviewCharacter[];
+  scenes?: PreviewScene[];
+  storyBeats?: PreviewScene[];
+};
+
+type PreviewConfig = {
+  duration?: number;
+  ratio?: string;
+  style?: string;
+  language?: string;
+  voice?: string;
+  camera?: string;
+};
+
+const FALLBACK_SCENES: PreviewScene[] = [
   {
-    id: '01',
-    image: ASSETS.scene01,
-    text: 'Alex enters the burger shop.',
+    sceneNumber: 1,
+    title: 'Scene 1',
+    description: 'The story begins.',
+    narration: '',
+    dialogue: [],
+    durationSeconds: 5,
   },
   {
-    id: '02',
-    image: ASSETS.scene02,
-    text: 'Alex asks the shopkeeper for burger.',
-  },
-  {
-    id: '03',
-    image: ASSETS.scene03,
-    text: 'Shopkeeper prepares the burger.',
-  },
-  {
-    id: '04',
-    image: ASSETS.scene04,
-    text: 'Alex receives the burger and is happy.',
+    sceneNumber: 2,
+    title: 'Scene 2',
+    description: 'The story continues.',
+    narration: '',
+    dialogue: [],
+    durationSeconds: 5,
   },
 ];
 
@@ -76,7 +156,155 @@ export default function AIPreviewConfirmationScreen() {
   const router = useRouter();
   const { width } = useWindowDimensions();
 
-  const scale = Math.min(width / 428, 1);
+  const [isGenerating, setIsGenerating] =
+    React.useState(false);
+
+  const {
+    story,
+    analysis,
+    config,
+    customization,
+  } = useLocalSearchParams<{
+    story?: string;
+    analysis?: string;
+    config?: string;
+    customization?: string;
+  }>();
+
+  const parseJson = <T,>(
+    value: string | string[] | undefined,
+    fallback: T,
+  ): T => {
+    if (typeof value !== 'string' || !value.trim()) {
+      return fallback;
+    }
+
+    try {
+      return JSON.parse(value) as T;
+    } catch (error) {
+      console.error(
+        '[AI PREVIEW] JSON parse error:',
+        error,
+      );
+      return fallback;
+    }
+  };
+
+  const storyAnalysis =
+    parseJson<StoryAnalysisPayload>(analysis, {});
+
+  const previewConfig =
+    parseJson<PreviewConfig>(
+      typeof customization === 'string'
+        ? customization
+        : config,
+      {},
+    );
+
+  /*
+   * Characters remain internal T2V generation data.
+   * They are detected by AI and sent to the backend,
+   * but are intentionally NOT shown as a user-editable
+   * Character Library section in this flow.
+   */
+  const aiCharacters =
+    Array.isArray(storyAnalysis.characters)
+      ? storyAnalysis.characters
+      : [];
+
+  const manifestScenes =
+    Array.isArray(storyAnalysis.storyBeats) &&
+    storyAnalysis.storyBeats.length > 0
+      ? storyAnalysis.storyBeats
+      : Array.isArray(storyAnalysis.scenes) &&
+          storyAnalysis.scenes.length > 0
+        ? storyAnalysis.scenes
+        : FALLBACK_SCENES;
+
+  const previewScenes = manifestScenes;
+
+  const scenePlans = manifestScenes.map((scene) => ({
+    sceneNumber: scene.sceneNumber,
+    id: scene.id,
+    title: scene.title,
+    description: scene.description,
+    narration: scene.narration,
+    dialogue: scene.dialogue ?? [],
+    durationSeconds: scene.durationSeconds,
+    location: scene.location,
+    visibleCharacterIds: scene.visibleCharacterIds ?? [],
+    actions: scene.actions ?? [],
+    characterPlans: scene.characterPlans ?? [],
+    startState: scene.startState ?? scene.description,
+    endState: scene.endState ?? scene.description,
+    continuity: scene.continuity ?? {
+      previousSceneNumber: undefined,
+      inheritedCharacterStates: {},
+      locationContinues: scene.sceneNumber > 1,
+      requiredContinuity: [],
+    },
+  }));
+
+  const requestedDuration =
+    Number(previewConfig.duration) || 30;
+
+  const safeDuration =
+    requestedDuration === 15 ||
+    requestedDuration === 30 ||
+    requestedDuration === 60
+      ? requestedDuration
+      : 30;
+
+  const plannedDuration =
+    previewScenes.reduce(
+      (total, scene) =>
+        total + Number(scene.durationSeconds || 0),
+      0,
+    );
+
+  const getCharacterName = useCallback(
+    (characterId: string) => {
+      const character = aiCharacters.find(
+        (item) => item.id === characterId,
+      );
+
+      return character?.name ?? 'Character';
+    },
+    [aiCharacters],
+  );
+
+  console.log(
+    '[AI PREVIEW] story:',
+    story,
+  );
+
+  console.log(
+    '[AI PREVIEW] scenes:',
+    previewScenes,
+  );
+
+  console.log(
+    '[AI PREVIEW] config:',
+    previewConfig,
+  );
+
+  console.log(
+    '[AI PREVIEW] AI characters (internal):',
+    aiCharacters,
+  );
+
+  console.log(
+    '[AI PREVIEW] displayed settings:',
+    {
+      duration: safeDuration,
+      ratio: previewConfig.ratio,
+      style: previewConfig.style,
+      language: previewConfig.language,
+      voice: previewConfig.voice,
+      camera: previewConfig.camera,
+    },
+  );
+
   const horizontalPadding = width <= 375 ? 16 : 22;
 
   const handleBack = useCallback(() => {
@@ -87,21 +315,278 @@ export default function AIPreviewConfirmationScreen() {
     }
   }, [router]);
 
-  const handleEditCharacters = useCallback(() => {
-    router.push('/select-characters');
-  }, [router]);
-
   const handleEditScenes = useCallback(() => {
-    router.push('/view-scenes');
-  }, [router]);
+    router.push({
+      pathname: '/review-scenes' as any,
+      params: {
+        story: typeof story === 'string' ? story : '',
+        analysis:
+          typeof analysis === 'string'
+            ? analysis
+            : '',
+        config:
+          typeof config === 'string'
+            ? config
+            : '',
+        customization:
+          typeof customization === 'string'
+            ? customization
+            : '',
+      },
+    });
+  }, [analysis, config, customization, router, story]);
 
   const handleEditSettings = useCallback(() => {
     router.back();
   }, [router]);
 
-  const handleGenerate = useCallback(() => {
-    router.push('/video-generating');
-  }, [router]);
+  const handleGenerate = useCallback(async () => {
+    if (isGenerating) {
+      return;
+    }
+
+    const storyPrompt =
+      typeof story === 'string' &&
+      story.trim()
+        ? story.trim()
+        : storyAnalysis.summary?.trim() ||
+          previewScenes[0]?.description ||
+          'Create a cinematic short video scene.';
+
+    const scenePrompts =
+      previewScenes.length > 0
+        ? previewScenes.map((scene) => {
+            const dialogueText =
+              (scene.dialogue ?? [])
+                .map(
+                  (line) =>
+                    `${getCharacterName(line.characterId)}: ${line.text}`,
+                )
+                .join(' | ');
+
+            return [
+              `Scene ${scene.sceneNumber}: ${scene.title}.`,
+              scene.description,
+              dialogueText
+                ? `Dialogue: ${dialogueText}`
+                : '',
+            ]
+              .filter(Boolean)
+              .join(' ');
+          })
+        : [storyPrompt];
+
+    const narration =
+      previewScenes
+        .map((scene) => scene.narration?.trim())
+        .filter(Boolean)
+        .join(' ') ||
+      storyAnalysis.summary?.trim() ||
+      storyPrompt;
+
+    const ratio =
+      previewConfig.ratio === '16:9'
+        ? '16:9'
+        : previewConfig.ratio === '1:1'
+          ? '1:1'
+          : '9:16';
+
+    const style =
+      previewConfig.style?.trim() || '3d';
+
+    const language =
+      previewConfig.language?.trim() ||
+      'English (US)';
+
+    const voice =
+      previewConfig.voice?.trim() || 'auto';
+
+    const camera =
+      previewConfig.camera?.trim() || 'auto';
+
+    /*
+     * Keep AI-detected characters in the generation payload.
+     * They are internal story-generation data, not user-selected
+     * Character Library entries.
+     */
+    const characters =
+      aiCharacters.map((character) => ({
+        id: character.id,
+        name: character.name,
+        role: character.role,
+        visualDescription:
+          character.visualDescription,
+        imagePrompt:
+          character.imagePrompt,
+        imageUrl:
+          resolveCharacterImageUrl(
+            character.imageUrl,
+          ),
+        source: 'ai' as const,
+      }));
+
+    const promptParts = [
+      storyPrompt,
+
+      characters.length > 0
+        ? `AI-detected story characters:\n${characters
+            .map(
+              (character) =>
+                `${character.name} (${character.role}): ${character.visualDescription}`,
+            )
+            .join('\n')}`
+        : '',
+
+      `Visual style: ${style}.`,
+      `Camera: ${camera}.`,
+      `Language for narration and dialogue: ${language}.`,
+      `Generate the story as a coherent multi-scene video.`,
+    ].filter(Boolean);
+
+    const combinedPrompt =
+      promptParts.join('\n\n');
+
+    setIsGenerating(true);
+
+    try {
+      const requestBody = {
+        prompt: combinedPrompt,
+        scenePlans,
+        scenePrompts,
+        narration:
+          voice === 'none'
+            ? undefined
+            : narration,
+        durationSeconds: safeDuration,
+        resolution: '480p',
+        aspectRatio: ratio,
+        style,
+        language,
+        voice,
+        camera,
+        characters,
+        story:
+          typeof story === 'string'
+            ? story
+            : '',
+      };
+
+      console.log(
+        '[AI PREVIEW] Sending complete video generation request:',
+        requestBody,
+      );
+
+      const response =
+        await fetch(
+          `${API_BASE_URL}/video/generate`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type':
+                'application/json',
+            },
+            body: JSON.stringify(
+              requestBody,
+            ),
+          },
+        );
+
+      const data =
+        (await response.json()) as {
+          success?: boolean;
+          jobId?: string;
+          status?: string;
+          stage?: string;
+          progress?: number;
+          video?: string;
+          error?: string;
+          durationSeconds?: number;
+          model?: string;
+        };
+
+      if (
+        !response.ok ||
+        !data.success ||
+        !data.jobId
+      ) {
+        throw new Error(
+          data.error ||
+            'Unable to start video generation.',
+        );
+      }
+
+      console.log(
+        '[AI PREVIEW] Video generation job created:',
+        data,
+      );
+
+      router.push({
+        pathname:
+          '/video-generating' as any,
+        params: {
+          jobId: data.jobId,
+          story:
+            typeof story === 'string'
+              ? story
+              : '',
+          title:
+            storyAnalysis.title ?? '',
+          duration: String(safeDuration),
+          ratio,
+          style,
+          language,
+          voice,
+          camera,
+          analysis:
+            typeof analysis === 'string'
+              ? analysis
+              : '',
+          config:
+            JSON.stringify({
+              duration: safeDuration,
+              ratio,
+              style,
+              language,
+              voice,
+              camera,
+            }),
+          status:
+            data.status ?? 'queued',
+          stage:
+            data.stage ?? 'preparing',
+          progress: String(
+            data.progress ?? 0,
+          ),
+        },
+      });
+    } catch (error) {
+      console.error(
+        '[AI PREVIEW] Video generation error:',
+        error,
+      );
+
+      Alert.alert(
+        'Unable to Start Video Generation',
+        error instanceof Error
+          ? error.message
+          : 'Something went wrong while starting your video generation.',
+      );
+    } finally {
+      setIsGenerating(false);
+    }
+  }, [
+    aiCharacters,
+    analysis,
+    getCharacterName,
+    isGenerating,
+    previewConfig,
+    previewScenes,
+    router,
+    scenePlans,
+    story,
+    storyAnalysis.summary,
+    storyAnalysis.title,
+  ]);
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -111,15 +596,12 @@ export default function AIPreviewConfirmationScreen() {
       />
 
       <View style={styles.screen}>
-        {/* ======================================================
-            HEADER — SAME REFERENCE SYSTEM
-        ====================================================== */}
-
         <View
           style={[
             styles.header,
             {
-              paddingHorizontal: horizontalPadding,
+              paddingHorizontal:
+                horizontalPadding,
             },
           ]}
         >
@@ -148,8 +630,14 @@ export default function AIPreviewConfirmationScreen() {
               minimumFontScale={0.78}
             >
               Text to{' '}
-              <Text style={styles.headerTitleAccent}>Video</Text>
-              <Text style={styles.headerSparkle}>✦</Text>
+              <Text
+                style={styles.headerTitleAccent}
+              >
+                Video
+              </Text>
+              <Text style={styles.headerSparkle}>
+                ✦
+              </Text>
             </Text>
           </View>
 
@@ -167,14 +655,14 @@ export default function AIPreviewConfirmationScreen() {
               resizeMode="contain"
               style={styles.coinIcon}
             />
-            <Text style={styles.creditValue}>12,450</Text>
-            <Text style={styles.creditPlus}>+</Text>
+            <Text style={styles.creditValue}>
+              12,450
+            </Text>
+            <Text style={styles.creditPlus}>
+              +
+            </Text>
           </Pressable>
         </View>
-
-        {/* ======================================================
-            MAIN SCROLL
-        ====================================================== */}
 
         <ScrollView
           showsVerticalScrollIndicator={false}
@@ -182,15 +670,12 @@ export default function AIPreviewConfirmationScreen() {
           contentContainerStyle={[
             styles.scrollContent,
             {
-              paddingHorizontal: horizontalPadding,
+              paddingHorizontal:
+                horizontalPadding,
               paddingBottom: 112,
             },
           ]}
         >
-          {/* ====================================================
-              HERO
-          ==================================================== */}
-
           <View style={styles.heroCard}>
             <View style={styles.heroIconWrap}>
               <Ionicons
@@ -198,19 +683,21 @@ export default function AIPreviewConfirmationScreen() {
                 size={36}
                 color={COLORS.cyan}
               />
-              <Text style={styles.heroSparkOne}>✦</Text>
-              <Text style={styles.heroSparkTwo}>✦</Text>
+              <Text style={styles.heroSparkOne}>
+                ✦
+              </Text>
+              <Text style={styles.heroSparkTwo}>
+                ✦
+              </Text>
             </View>
 
             <View style={styles.heroCopy}>
               <Text style={styles.heroTitle}>
                 AI Preview
               </Text>
-
               <Text style={styles.heroDescription}>
                 Review and confirm the details.
               </Text>
-
               <Text style={styles.heroDescription}>
                 You can edit anything before generating.
               </Text>
@@ -223,17 +710,15 @@ export default function AIPreviewConfirmationScreen() {
             />
           </View>
 
-          {/* ====================================================
-              STORY
-          ==================================================== */}
-
           <SectionCard>
             <View style={styles.sectionTopRow}>
               <View style={styles.sectionTitleRow}>
                 <Text style={styles.sectionTitle}>
                   Your Story
                 </Text>
-                <Text style={styles.sectionSpark}>✦</Text>
+                <Text style={styles.sectionSpark}>
+                  ✦
+                </Text>
               </View>
 
               <PillButton
@@ -245,101 +730,23 @@ export default function AIPreviewConfirmationScreen() {
             </View>
 
             <Text style={styles.storyText}>
-              A young boy named Alex visits a local burger shop.
-              {'\n'}
-              He asks the shopkeeper for his favorite burger.
-              {'\n'}
-              The shopkeeper prepares the burger and gives it
-              {'\n'}
-              to Alex. Alex receives the burger and is happy.
+              {storyAnalysis.summary ||
+                (typeof story === 'string' &&
+                story.trim()
+                  ? story
+                  : 'Your story is ready for review.')}
             </Text>
           </SectionCard>
 
-          {/* ====================================================
-              CHARACTERS
-          ==================================================== */}
-
           <SectionCard>
             <View style={styles.sectionTopRow}>
               <View style={styles.sectionTitleRow}>
                 <Text style={styles.sectionTitle}>
-                  Your Characters (2)
+                  Planned Scenes ({previewScenes.length})
                 </Text>
-                <Text style={styles.sectionSpark}>✦</Text>
-              </View>
-
-              <PillButton
-                icon="create-outline"
-                label="Edit All"
-                color={COLORS.cyan}
-                onPress={handleEditCharacters}
-              />
-            </View>
-
-            <View style={styles.charactersRow}>
-              <CharacterCard
-                image={ASSETS.alex}
-                name="Alex"
-                role="Main Character"
-                description="Young boy with red hair, fair skin, blue hoodie and white sneakers."
-              />
-
-              <CharacterCard
-                image={ASSETS.shopkeeper}
-                name="Shopkeeper"
-                role="Supporting Character"
-                description="Man with black hair, beard and black apron."
-              />
-            </View>
-
-            <View style={styles.characterReuseCard}>
-              <Ionicons
-                name="people-outline"
-                size={34}
-                color={COLORS.cyan}
-              />
-
-              <View style={styles.reuseCopy}>
-                <Text style={styles.reuseTitle}>
-                  Character Reuse
+                <Text style={styles.sectionSpark}>
+                  ✦
                 </Text>
-                <Text style={styles.reuseDescription}>
-                  These characters are saved in your library.
-                  {'\n'}
-                  You can reuse them in future videos.
-                </Text>
-              </View>
-
-              <Pressable
-                onPress={() => undefined}
-                style={({ pressed }) => [
-                  styles.viewCharactersButton,
-                  pressed && styles.pressed,
-                ]}
-              >
-                <Text style={styles.viewCharactersText}>
-                  View My Characters
-                </Text>
-                <Ionicons
-                  name="chevron-forward"
-                  size={18}
-                  color={COLORS.white}
-                />
-              </Pressable>
-            </View>
-          </SectionCard>
-
-          {/* ====================================================
-              PLANNED SCENES
-          ==================================================== */}
-
-          <SectionCard>
-            <View style={styles.sectionTopRow}>
-              <View style={styles.sectionTitleRow}>
-                <Text style={styles.sectionTitle}>
-                  Planned Scenes (4)
-                </Text>
-                <Text style={styles.sectionSpark}>✦</Text>
               </View>
 
               <PillButton
@@ -350,39 +757,72 @@ export default function AIPreviewConfirmationScreen() {
               />
             </View>
 
-            <View style={styles.sceneGrid}>
-              {SCENES.map((scene) => (
+            <View style={styles.dynamicSceneList}>
+              {previewScenes.map((scene) => (
                 <View
-                  key={scene.id}
-                  style={styles.plannedScene}
+                  key={`scene-${scene.sceneNumber}`}
+                  style={styles.dynamicScene}
                 >
-                  <View style={styles.sceneImageWrap}>
-                    <Image
-                      source={scene.image}
-                      resizeMode="cover"
-                      style={styles.sceneImage}
-                    />
-                    <View style={styles.sceneBadge}>
-                      <Text style={styles.sceneBadgeText}>
-                        {scene.id}
-                      </Text>
-                    </View>
+                  <View style={styles.dynamicSceneBadge}>
+                    <Text style={styles.sceneBadgeText}>
+                      {String(
+                        scene.sceneNumber,
+                      ).padStart(2, '0')}
+                    </Text>
                   </View>
 
-                  <Text
-                    style={styles.sceneText}
-                    numberOfLines={3}
-                  >
-                    {scene.text}
-                  </Text>
+                  <View style={styles.dynamicSceneCopy}>
+                    <Text
+                      style={styles.dynamicSceneTitle}
+                      numberOfLines={2}
+                    >
+                      {scene.title}
+                    </Text>
+
+                    <Text
+                      style={styles.dynamicSceneDescription}
+                      numberOfLines={3}
+                    >
+                      {scene.description}
+                    </Text>
+
+                    {scene.dialogue &&
+                    scene.dialogue.length > 0 ? (
+                      <Text
+                        style={styles.dynamicSceneDialogue}
+                        numberOfLines={4}
+                      >
+                        {scene.dialogue
+                          .map(
+                            (line) =>
+                              `${getCharacterName(line.characterId)}: ${line.text}`,
+                          )
+                          .join(' • ')}
+                      </Text>
+                    ) : null}
+
+                    <Text style={styles.dynamicSceneMeta}>
+                      {scene.durationSeconds}s
+                    </Text>
+                  </View>
                 </View>
               ))}
             </View>
-          </SectionCard>
 
-          {/* ====================================================
-              VIDEO SETTINGS
-          ==================================================== */}
+            <View style={styles.sceneSummaryRow}>
+              <Ionicons
+                name="film-outline"
+                size={20}
+                color={COLORS.cyan}
+              />
+              <Text style={styles.sceneSummaryText}>
+                {previewScenes.length} scenes • {safeDuration}s target
+                {plannedDuration !== safeDuration
+                  ? ` • ${plannedDuration}s storyboard`
+                  : ''}
+              </Text>
+            </View>
+          </SectionCard>
 
           <SectionCard>
             <View style={styles.sectionTopRow}>
@@ -390,7 +830,9 @@ export default function AIPreviewConfirmationScreen() {
                 <Text style={styles.sectionTitle}>
                   Video Settings
                 </Text>
-                <Text style={styles.sectionSpark}>✦</Text>
+                <Text style={styles.sectionSpark}>
+                  ✦
+                </Text>
               </View>
 
               <PillButton
@@ -401,62 +843,100 @@ export default function AIPreviewConfirmationScreen() {
               />
             </View>
 
-            <View style={styles.settingsRow}>
+            <View style={styles.settingsGrid}>
               <SettingItem
                 icon="time-outline"
-                value="30 sec"
+                value={`${safeDuration} sec`}
                 label="Duration"
               />
 
               <SettingItem
                 icon="phone-portrait-outline"
-                value="9:16"
-                label="Portrait"
+                value={previewConfig.ratio ?? '9:16'}
+                label="Aspect Ratio"
               />
 
               <SettingItem
                 icon="film-outline"
-                value="3D Animation"
-                label="Style"
+                value={
+                  previewConfig.style === '3d'
+                    ? '3D Animation'
+                    : previewConfig.style
+                      ? String(
+                          previewConfig.style,
+                        )
+                      : '3D Animation'
+                }
+                label="Video Style"
+              />
+
+              <SettingItem
+                icon="globe-outline"
+                value={
+                  previewConfig.language ??
+                  'English (US)'
+                }
+                label="Language"
               />
 
               <SettingItem
                 icon="pulse-outline"
-                value="AI Auto"
+                value={
+                  previewConfig.voice === 'auto'
+                    ? 'AI Auto'
+                    : previewConfig.voice
+                      ? String(
+                          previewConfig.voice,
+                        )
+                      : 'AI Auto'
+                }
                 label="Voice"
               />
 
               <SettingItem
                 icon="camera-outline"
-                value="Auto"
+                value={
+                  previewConfig.camera ?? 'auto'
+                }
                 label="Camera"
               />
             </View>
           </SectionCard>
         </ScrollView>
 
-        {/* ======================================================
-            FIXED GENERATE
-        ====================================================== */}
-
         <View style={styles.fixedBottom}>
           <Pressable
-            onPress={handleGenerate}
+            onPress={() => {
+              void handleGenerate();
+            }}
+            disabled={isGenerating}
             style={({ pressed }) => [
               styles.generateButton,
+              isGenerating &&
+                styles.generateDisabled,
               pressed && styles.generatePressed,
             ]}
             accessibilityRole="button"
             accessibilityLabel="Generate Video"
+            accessibilityState={{
+              disabled: isGenerating,
+              busy: isGenerating,
+            }}
           >
             <LinearGradient
-              colors={['#00CFFF', '#2C75FF', '#8C2EFF']}
+              colors={[
+                '#00CFFF',
+                '#2C75FF',
+                '#8C2EFF',
+              ]}
               start={{ x: 0, y: 0.5 }}
               end={{ x: 1, y: 0.5 }}
               style={styles.generateGradient}
             >
               <Text style={styles.generateText}>
-                Generate Video
+                {isGenerating
+                  ? 'Generating...'
+                  : 'Generate Video'}
               </Text>
 
               <Text style={styles.generateSparkles}>
@@ -487,10 +967,6 @@ export default function AIPreviewConfirmationScreen() {
   );
 }
 
-/* ==============================================================
-   SECTION CARD
-============================================================== */
-
 function SectionCard({
   children,
 }: {
@@ -502,10 +978,6 @@ function SectionCard({
     </View>
   );
 }
-
-/* ==============================================================
-   PILL BUTTON
-============================================================== */
 
 function PillButton({
   icon,
@@ -531,13 +1003,10 @@ function PillButton({
         size={16}
         color={color}
       />
-
       <Text
         style={[
           styles.pillButtonText,
-          {
-            color,
-          },
+          { color },
         ]}
       >
         {label}
@@ -545,67 +1014,6 @@ function PillButton({
     </Pressable>
   );
 }
-
-/* ==============================================================
-   CHARACTER CARD
-============================================================== */
-
-function CharacterCard({
-  image,
-  name,
-  role,
-  description,
-}: {
-  image: any;
-  name: string;
-  role: string;
-  description: string;
-}) {
-  return (
-    <View style={styles.characterCard}>
-      <Image
-        source={image}
-        resizeMode="cover"
-        style={styles.characterImage}
-      />
-
-      <View style={styles.characterCopy}>
-        <Text
-          style={styles.characterName}
-          numberOfLines={1}
-        >
-          {name}
-        </Text>
-
-        <Text style={styles.characterRole}>
-          {role}
-        </Text>
-
-        <Text
-          style={styles.characterDescription}
-          numberOfLines={4}
-        >
-          {description}
-        </Text>
-      </View>
-
-      <View style={styles.savedBadge}>
-        <Ionicons
-          name="checkmark"
-          size={11}
-          color={COLORS.black}
-        />
-        <Text style={styles.savedText}>
-          Saved
-        </Text>
-      </View>
-    </View>
-  );
-}
-
-/* ==============================================================
-   SETTING ITEM
-============================================================== */
 
 function SettingItem({
   icon,
@@ -645,10 +1053,6 @@ function SettingItem({
   );
 }
 
-/* ==============================================================
-   STYLES
-============================================================== */
-
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
@@ -663,10 +1067,6 @@ const styles = StyleSheet.create({
   pressed: {
     opacity: 0.72,
   },
-
-  /* ============================================================
-     HEADER — REFERENCE
-  ============================================================ */
 
   header: {
     height: 50,
@@ -744,18 +1144,10 @@ const styles = StyleSheet.create({
     marginLeft: 6,
   },
 
-  /* ============================================================
-     MAIN
-  ============================================================ */
-
   scrollContent: {
     paddingTop: 11,
     gap: 7,
   },
-
-  /* ============================================================
-     HERO
-  ============================================================ */
 
   heroCard: {
     minHeight: 101,
@@ -822,10 +1214,6 @@ const styles = StyleSheet.create({
     flexShrink: 0,
   },
 
-  /* ============================================================
-     GENERIC CARD
-  ============================================================ */
-
   sectionCard: {
     width: '100%',
     borderWidth: 1,
@@ -880,10 +1268,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 
-  /* ============================================================
-     STORY
-  ============================================================ */
-
   storyText: {
     color: COLORS.textSecondary,
     fontSize: 12.2,
@@ -891,182 +1275,35 @@ const styles = StyleSheet.create({
     marginTop: 10,
   },
 
-  /* ============================================================
-     CHARACTERS
-  ============================================================ */
-
-  charactersRow: {
-    flexDirection: 'row',
+  dynamicSceneList: {
+    width: '100%',
     gap: 8,
     marginTop: 10,
   },
 
-  characterCard: {
-    flex: 1,
-    minWidth: 0,
-    minHeight: 137,
-    borderRadius: 11,
+  dynamicScene: {
+    width: '100%',
+    minHeight: 74,
+    borderRadius: 10,
     borderWidth: 1,
     borderColor: COLORS.border,
     backgroundColor: COLORS.cardSoft,
-    padding: 8,
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    position: 'relative',
-    overflow: 'hidden',
-  },
-
-  characterImage: {
-    width: 70,
-    height: 88,
-    borderRadius: 9,
-    backgroundColor: '#0A1820',
-    flexShrink: 0,
-  },
-
-  characterCopy: {
-    flex: 1,
-    minWidth: 0,
-    paddingLeft: 8,
-    paddingRight: 2,
-  },
-
-  characterName: {
-    color: COLORS.white,
-    fontSize: 14,
-    lineHeight: 18,
-    fontWeight: '700',
-  },
-
-  characterRole: {
-    color: COLORS.cyan,
-    fontSize: 9.5,
-    lineHeight: 12,
-    marginTop: 4,
-  },
-
-  characterDescription: {
-    color: COLORS.textSecondary,
-    fontSize: 9.5,
-    lineHeight: 14,
-    marginTop: 8,
-  },
-
-  savedBadge: {
-    position: 'absolute',
-    left: 8,
-    bottom: 8,
-    height: 24,
-    paddingHorizontal: 7,
-    borderRadius: 12,
-    backgroundColor: '#062B35',
-    borderWidth: 1,
-    borderColor: '#0A7180',
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 3,
+    paddingHorizontal: 9,
+    paddingVertical: 8,
   },
 
-  savedText: {
-    color: COLORS.cyan,
-    fontSize: 8.5,
-    fontWeight: '600',
-  },
-
-  characterReuseCard: {
-    marginTop: 10,
-    minHeight: 70,
-    borderRadius: 11,
-    borderWidth: 1,
-    borderColor: COLORS.purple,
-    backgroundColor: '#0B0B25',
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 10,
-  },
-
-  reuseCopy: {
-    flex: 1,
-    minWidth: 0,
-    marginLeft: 9,
-  },
-
-  reuseTitle: {
-    color: COLORS.white,
-    fontSize: 13,
-    lineHeight: 16,
-    fontWeight: '700',
-  },
-
-  reuseDescription: {
-    color: COLORS.textSecondary,
-    fontSize: 9.5,
-    lineHeight: 14,
-    marginTop: 3,
-  },
-
-  viewCharactersButton: {
-    minWidth: 120,
-    height: 38,
-    borderRadius: 19,
-    borderWidth: 1,
-    borderColor: '#5934A0',
-    backgroundColor: '#18112D',
-    paddingHorizontal: 10,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 4,
-    flexShrink: 0,
-  },
-
-  viewCharactersText: {
-    color: COLORS.white,
-    fontSize: 9,
-    fontWeight: '600',
-  },
-
-  /* ============================================================
-     PLANNED SCENES
-  ============================================================ */
-
-  sceneGrid: {
-    flexDirection: 'row',
-    gap: 7,
-    marginTop: 10,
-  },
-
-  plannedScene: {
-    flex: 1,
-    minWidth: 0,
-  },
-
-  sceneImageWrap: {
-    width: '100%',
-    aspectRatio: 1.18,
-    borderRadius: 8,
-    overflow: 'hidden',
-    position: 'relative',
-    backgroundColor: '#0A1820',
-  },
-
-  sceneImage: {
-    width: '100%',
-    height: '100%',
-  },
-
-  sceneBadge: {
-    position: 'absolute',
-    left: 4,
-    top: 4,
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: '#061822',
+  dynamicSceneBadge: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     borderWidth: 1,
     borderColor: COLORS.cyan,
+    backgroundColor: '#061822',
     alignItems: 'center',
     justifyContent: 'center',
+    flexShrink: 0,
   },
 
   sceneBadgeText: {
@@ -1075,26 +1312,72 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
 
-  sceneText: {
-    color: COLORS.textSecondary,
-    fontSize: 9.5,
-    lineHeight: 14,
-    marginTop: 6,
+  dynamicSceneCopy: {
+    flex: 1,
+    minWidth: 0,
+    marginLeft: 9,
+    paddingRight: 5,
   },
 
-  /* ============================================================
-     VIDEO SETTINGS
-  ============================================================ */
+  dynamicSceneTitle: {
+    color: COLORS.white,
+    fontSize: 11.5,
+    lineHeight: 15,
+    fontWeight: '700',
+  },
 
-  settingsRow: {
+  dynamicSceneDescription: {
+    color: COLORS.textSecondary,
+    fontSize: 9.5,
+    lineHeight: 13,
+    marginTop: 3,
+  },
+
+  dynamicSceneDialogue: {
+    color: '#D8B7FF',
+    fontSize: 9.2,
+    lineHeight: 13,
+    marginTop: 4,
+  },
+
+  dynamicSceneMeta: {
+    color: COLORS.cyan,
+    fontSize: 9,
+    lineHeight: 12,
+    marginTop: 3,
+    fontWeight: '600',
+  },
+
+  sceneSummaryRow: {
+    marginTop: 9,
+    minHeight: 34,
+    borderRadius: 9,
+    backgroundColor: '#05242C',
+    borderWidth: 1,
+    borderColor: '#104C5A',
+    paddingHorizontal: 9,
     flexDirection: 'row',
-    gap: 7,
+    alignItems: 'center',
+  },
+
+  sceneSummaryText: {
+    color: COLORS.textSecondary,
+    fontSize: 9.5,
+    lineHeight: 13,
+    marginLeft: 7,
+    flex: 1,
+  },
+
+  settingsGrid: {
+    width: '100%',
     marginTop: 10,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 7,
   },
 
   settingItem: {
-    flex: 1,
-    minWidth: 0,
+    width: '31.8%',
     minHeight: 88,
     borderRadius: 10,
     borderWidth: 1,
@@ -1102,13 +1385,13 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.cardSoft,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 4,
+    paddingHorizontal: 5,
   },
 
   settingValue: {
     color: COLORS.white,
-    fontSize: 10.5,
-    lineHeight: 14,
+    fontSize: 10,
+    lineHeight: 13,
     textAlign: 'center',
     marginTop: 6,
     fontWeight: '500',
@@ -1121,10 +1404,6 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: 2,
   },
-
-  /* ============================================================
-     FIXED GENERATE
-  ============================================================ */
 
   fixedBottom: {
     position: 'absolute',
@@ -1142,6 +1421,10 @@ const styles = StyleSheet.create({
     height: 55,
     borderRadius: 28,
     overflow: 'hidden',
+  },
+
+  generateDisabled: {
+    opacity: 0.62,
   },
 
   generatePressed: {
