@@ -1,3 +1,5 @@
+import { fetch as expoFetch } from "expo/fetch";
+import { File } from "expo-file-system";
 import React, { useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -335,19 +337,13 @@ export default function ProfileSetupScreen() {
       let profileImageUrl: string | undefined;
 
       if (profileImage) {
+        const file = new File(profileImage);
         const formData = new FormData();
 
-        formData.append(
-          "image",
-          {
-            uri: profileImage,
-            name: `profile-${Date.now()}.jpg`,
-            type: "image/jpeg",
-          } as any,
-        );
+        formData.append("image", file);
 
-        const uploadResponse = await fetch(
-          "http://192.168.31.189:4000/auth/profile-image",
+        const uploadResponse = await expoFetch(
+          "https://evasive-twiddling-lunacy.ngrok-free.dev/auth/profile-image",
           {
             method: "POST",
             body: formData,
@@ -372,7 +368,7 @@ export default function ProfileSetupScreen() {
         }
 
         profileImageUrl =
-          `http://192.168.31.189:4000${uploadData.imageUrl}`;
+          `https://evasive-twiddling-lunacy.ngrok-free.dev${uploadData.imageUrl}`;
       }
 
       await authService.completeProfile({
@@ -386,11 +382,18 @@ export default function ProfileSetupScreen() {
     } catch (saveError) {
       console.error("Profile save error:", saveError);
 
-      setError(
+      const message =
         saveError instanceof Error
           ? saveError.message
-          : "Failed to create profile. Try again.",
+          : "Failed to create profile. Please try again.";
+
+      Alert.alert(
+        "Unable to create profile",
+        message,
+        [{ text: "OK" }],
       );
+
+      setError(undefined);
     } finally {
       setIsSubmitting(false);
     }

@@ -2273,7 +2273,7 @@ const styles = StyleSheet.create({
   },
 
   thumbnailOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
 
     justifyContent:
       'center',

@@ -1313,7 +1313,7 @@ const styles = StyleSheet.create({
      ======================================================= */
 
   analysisLoaderOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     zIndex: 9999,
     elevation: 9999,
     alignItems: 'center',
@@ -1321,7 +1321,7 @@ const styles = StyleSheet.create({
   },
 
   analysisLoaderBackdrop: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: 'rgba(2, 10, 16, 0.96)',
   },
 

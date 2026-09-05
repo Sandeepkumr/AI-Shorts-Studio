@@ -378,7 +378,7 @@ function FullScreenVideoModal({
               }
               nativeControls
               contentFit="contain"
-              allowsFullscreen
+              fullscreenOptions={{ enable: true }}
               allowsPictureInPicture
             />
           ) : (
@@ -1850,7 +1850,7 @@ const styles = StyleSheet.create({
   },
 
   thumbnailShade: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: "rgba(0,0,0,0.08)",
   },
 

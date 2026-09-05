@@ -1105,7 +1105,7 @@ const styles = StyleSheet.create({
     },
 
     videoOverlay: {
-        ...StyleSheet.absoluteFillObject,
+        ...StyleSheet.absoluteFill,
     },
 
     playButton: {

@@ -1395,13 +1395,13 @@ function createStyles(
     },
 
     background: {
-      ...StyleSheet.absoluteFillObject,
+      ...StyleSheet.absoluteFill,
       backgroundColor:
         theme.colors.background,
     },
 
     particles: {
-      ...StyleSheet.absoluteFillObject,
+      ...StyleSheet.absoluteFill,
     },
 
     particle: {
@@ -1707,7 +1707,7 @@ function createStyles(
        ======================================================== */
 
     finalFlash: {
-      ...StyleSheet.absoluteFillObject,
+      ...StyleSheet.absoluteFill,
       backgroundColor: "#D8FFFF",
       zIndex: 20,
     },

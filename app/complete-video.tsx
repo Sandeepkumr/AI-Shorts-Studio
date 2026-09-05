@@ -1862,7 +1862,7 @@ const styles = StyleSheet.create({
     },
 
     videoThumbnail: {
-        ...StyleSheet.absoluteFillObject,
+        ...StyleSheet.absoluteFill,
         width: undefined,
         height: undefined,
     },

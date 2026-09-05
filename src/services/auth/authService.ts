@@ -28,7 +28,7 @@ type ProfileInput = {
   profileImageUrl?: string;
 };
 
-const API_BASE_URL = "http://192.168.31.189:4000";
+const API_BASE_URL = "https://evasive-twiddling-lunacy.ngrok-free.dev";
 const STORAGE_KEY = "@shivora/current_user";
 
 let currentUser: AuthUser | null = null;

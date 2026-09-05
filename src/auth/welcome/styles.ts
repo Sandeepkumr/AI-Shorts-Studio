@@ -127,7 +127,7 @@ theme.spacing[4] },
       fontSize: 16,
       textDecorationLine: "underline",
     },
-    particleLayer: { ...StyleSheet.absoluteFillObject },
+    particleLayer: { ...StyleSheet.absoluteFill },
     particle: {
       alignItems: "center",
       backgroundColor: welcomeColors.accent,
